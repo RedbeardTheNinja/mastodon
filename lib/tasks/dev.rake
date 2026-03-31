@@ -441,8 +441,127 @@ namespace :dev do
         text: 'This post has a manual quote policy',
         account: remote_account,
         visibility: :public,
-        quote_approval_policy: Status::QUOTE_APPROVAL_POLICY_FLAGS[:public]
+        quote_approval_policy: InteractionPolicy::POLICY_FLAGS[:public] << 16
       ).find_or_create_by!(id: 10_000_030)
+    end
+  end
+
+  desc 'Add a "New To Me" list to the admin account and seed it with sample posts. Safe to run multiple times.'
+  task setup_new_to_me: :environment do
+    admin_user = User.find_by(email: 'admin@localhost') || User.admins.first
+    abort 'Could not find admin user. Run bin/setup first.' unless admin_user
+
+    admin_account = admin_user.account
+
+    # Keep the admin feed active
+    admin_user.update!(current_sign_in_at: Time.now.utc)
+
+    Chewy.strategy(:mastodon) do
+      # Create a dedicated poster account for New To Me demo content
+      ntm_poster = Account.create_with(
+        username: 'new_to_me_demo',
+        display_name: 'New To Me Demo Account',
+        note: 'Posts used to demonstrate the New To Me feed.'
+      ).find_or_create_by!(id: 11_000_000)
+
+      ntm_poster_user = User.create_with(
+        account_id: ntm_poster.id,
+        agreement: true,
+        password: SecureRandom.hex,
+        email: ENV.fetch('TEST_DATA_NTM_EMAIL', 'new_to_me_demo@localhost'),
+        confirmed_at: Time.now.utc,
+        approved: true,
+        bypass_registration_checks: true
+      ).find_or_create_by!(id: 11_000_000)
+      ntm_poster_user.mark_email_as_confirmed!
+      ntm_poster_user.approve!
+
+      # Admin follows the demo poster so fan-out works in future
+      Follow.find_or_create_by!(account: admin_account, target_account: ntm_poster)
+
+      # Create the "New To Me" list and add the poster to it
+      ntm_list = List.create_with(
+        title: NewToMe::LIST_TITLE
+      ).find_or_create_by!(account: admin_account, title: NewToMe::LIST_TITLE)
+      ListAccount.find_or_create_by!(list: ntm_list, account: ntm_poster)
+      # Plain text post
+      plain_post = Status.create_with(
+        text: 'This is a plain text post that will appear in your New To Me feed. Try liking it — it should disappear!',
+        account: ntm_poster,
+        visibility: :public
+      ).find_or_create_by!(id: 11_000_000)
+
+      # Post with hashtags
+      tagged_post = Status.create_with(
+        text: "This post has hashtags to help you discover it. #NewToMe #Mastodon #FediDev",
+        account: ntm_poster,
+        visibility: :public
+      ).find_or_create_by!(id: 11_000_001)
+      ProcessHashtagsService.new.call(tagged_post)
+
+      # Post with a content warning
+      cw_post = Status.create_with(
+        text: 'The content behind this CW is perfectly safe. This post tests that CW posts appear in the New To Me feed correctly.',
+        spoiler_text: 'New To Me feed test — click to expand',
+        account: ntm_poster,
+        visibility: :public
+      ).find_or_create_by!(id: 11_000_002)
+
+      # Post with a poll
+      poll_post = Status.create_with(
+        text: 'Which interaction should remove a post from the New To Me feed?',
+        account: ntm_poster,
+        visibility: :public,
+        poll_attributes: {
+          voters_count: 0,
+          account: ntm_poster,
+          expires_at: 7.days.from_now,
+          options: ['Liking it', 'Reblogging it', 'Replying to it', 'All three!'],
+          multiple: false,
+        }
+      ).find_or_create_by!(id: 11_000_003)
+
+      # Unlisted post (still eligible for New To Me)
+      unlisted_post = Status.create_with(
+        text: 'This is an unlisted (Quiet Public) post. It should still appear in the New To Me feed.',
+        account: ntm_poster,
+        visibility: :unlisted
+      ).find_or_create_by!(id: 11_000_004)
+
+      # Post with media
+      media_attachment = MediaAttachment.create_with(
+        account: ntm_poster,
+        file: File.open('spec/fixtures/files/600x400.png'),
+        description: 'Mastodon logo — a sample image for the New To Me feed demo'
+      ).find_or_create_by!(id: 11_000_000)
+      media_post = Status.create_with(
+        text: 'This post has an image attachment. Reblogs of this post should remove it from your New To Me feed.',
+        ordered_media_attachment_ids: [media_attachment.id],
+        account: ntm_poster,
+        visibility: :public
+      ).find_or_create_by!(id: 11_000_005)
+      media_attachment.update!(status_id: media_post.id)
+
+      # A reply from the poster to themselves (tests that replies to NTM posts remove them)
+      reply_post = Status.create_with(
+        text: 'This is a self-reply. If you reply to the post above this one, that post should disappear from your New To Me feed.',
+        account: ntm_poster,
+        visibility: :public,
+        thread: plain_post,
+        in_reply_to_id: plain_post.id,
+        in_reply_to_account_id: ntm_poster.id
+      ).find_or_create_by!(id: 11_000_006)
+
+      # Populate the NTM Redis feed directly for the admin account
+      ntm_manager = NewToMe::FeedManager.instance
+      [plain_post, tagged_post, cw_post, poll_post, unlisted_post, media_post, reply_post].each do |status|
+        ntm_manager.push(admin_account, status)
+      end
+
+      feed_size = RedisConnection.with { |r| r.zcard(NewToMe::FeedManager.instance.key(admin_account.id)) }
+      puts "New To Me list created: \"#{ntm_list.title}\" (id: #{ntm_list.id})"
+      puts "Seeded #{feed_size} posts into the New To Me feed for @#{admin_account.username}"
+      puts "Visit: http://localhost:3000/lists/#{ntm_list.id}"
     end
   end
 end
