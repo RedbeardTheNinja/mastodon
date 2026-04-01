@@ -15,7 +15,7 @@ module NewToMe
 
       with_read_replica do
         return unless @account.user&.signed_in_recently?
-        return if FeedManager.instance.filter(:home, @status, @account)
+        return if ::FeedManager.instance.filter(:home, @status, @account)
 
         NewToMe::FeedManager.instance.push(@account, @status)
       end

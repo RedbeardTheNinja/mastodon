@@ -42,6 +42,7 @@ module NewToMe
     # @param [Status] status
     # @return [Boolean]
     def interacted?(account, status)
+      status = status.reblog if status.reblog?
       Favourite.exists?(account: account, status: status) ||
         Status.exists?(account: account, reblog_of_id: status.id) ||
         Status.exists?(account: account, in_reply_to_id: status.id)

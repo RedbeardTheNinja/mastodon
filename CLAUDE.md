@@ -86,6 +86,24 @@ yarn build:production    # Production build
 
 Federation logic lives in `app/lib/activitypub/` and `lib/`. Incoming activities are processed by workers. The `app/workers/activitypub/` directory contains processors for different activity types.
 
+### Feed Architecture
+
+Feeds are Redis sorted sets (score = status ID, member = status ID). `Feed` base class in `app/models/feed.rb` reads from Redis; subclasses override `key`. `FeedManager` (`app/lib/feed_manager.rb`) handles push/remove/filter for home and list feeds and sends streaming updates via `redis.publish("timeline:...")`.
+
+Redis key patterns:
+- Home: `feed:home:{account_id}`
+- List: `feed:list:{list_id}`
+- New To Me: `feed:new_to_me:{account_id}`
+
+Useful debugging commands:
+```bash
+redis-cli ZCARD feed:home:{account_id}        # feed size
+redis-cli ZRANGE feed:home:{account_id} -5 -1 # 5 most recent IDs
+redis-cli ZRANGE dead 0 -1                    # failed Sidekiq jobs
+```
+
+**Reblog normalization:** The `Favourite` model normalizes to the original via `before_validation { self.status = status.reblog if status.reblog? }`. This means `favourite.status_id` is always the original status ID, never a reblog ID. Feed workers that store or remove statuses must account for this — store original IDs, not reblog IDs.
+
 ### Testing
 
 - **Ruby**: RSpec + Fabrication (factory gem). Tests use a real PostgreSQL database — do not mock the database.
@@ -99,3 +117,21 @@ Federation logic lives in `app/lib/activitypub/` and `lib/`. Incoming activities
 - Package manager: Yarn v4 (workspaces: root + `streaming/`)
 - API follows the Mastodon REST API spec; breaking changes require API versioning
 - i18n strings are in `config/locales/` (Ruby) and `app/javascript/mastodon/locales/` (JS)
+- **Ruby constant resolution in namespaced code:** Inside a module like `module NewToMe`, a bare `FeedManager` resolves to `NewToMe::FeedManager`, not the top-level class. Use `::FeedManager` to reference top-level constants from within sub-modules.
+
+## Production Server
+
+This instance runs in production mode (`RAILS_ENV=production`, database `mastodon_production`, domain `redbeardthe.ninja`). Ruby is managed via rbenv at `/home/mastodon/.rbenv`. App runs as the `mastodon` user.
+
+```bash
+# Run a Rails command
+sudo -u mastodon bash -c 'export PATH="/home/mastodon/.rbenv/shims:/home/mastodon/.rbenv/bin:$PATH" && eval "$(rbenv init -)" && RAILS_ENV=production bin/rails ...'
+
+# Query the database directly (faster for diagnostics)
+sudo -u mastodon psql -d mastodon_production -c "SELECT ..."
+
+# Restart Sidekiq gracefully (picks up code changes)
+sudo -u mastodon kill -USR2 $(pgrep -f sidekiq)
+```
+
+Note: `rails runner` in `development` mode fails at boot due to a `LetterOpenerWeb` CSP initializer issue. Use `RAILS_ENV=production` or query the database/Redis directly.
