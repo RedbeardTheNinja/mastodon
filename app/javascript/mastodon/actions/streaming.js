@@ -24,6 +24,7 @@ import {
   fillCommunityTimelineGaps,
   fillListTimelineGaps,
 } from './timelines';
+import { timelineDeleteStatus } from './timelines_typed';
 
 /**
  * @param {number} max
@@ -108,6 +109,9 @@ export const connectTimelineStream = (timelineId, channelName, params = {}, opti
           break;
         case 'delete':
           dispatch(deleteFromTimelines(data.payload));
+          break;
+        case 'feeds.remove':
+          dispatch(timelineDeleteStatus({ statusId: data.payload, timelineKey: timelineId }));
           break;
         case 'notification': {
           // @ts-expect-error

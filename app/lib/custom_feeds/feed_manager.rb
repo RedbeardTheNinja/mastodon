@@ -60,7 +60,11 @@ module CustomFeeds
       channel = "timeline:list:#{config.list_id}"
       ids.each do |id|
         remove(config, id)
-        redis.publish(channel, Oj.dump(event: :delete, payload: id.to_s))
+        # Use 'feeds.remove' instead of 'delete' so the frontend only removes
+        # the post from this specific list timeline rather than all timelines.
+        # The standard 'delete' event calls deleteFromTimelines which purges
+        # the status from every feed in the Redux store (home, public, etc.).
+        redis.publish(channel, Oj.dump(event: 'feeds.remove', payload: id.to_s))
       end
     end
 
