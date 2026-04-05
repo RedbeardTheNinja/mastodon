@@ -7,6 +7,7 @@ Rails.application.config.to_prepare do
   CustomFeeds::Sources::RemotePublicTimeline.register!
   CustomFeeds::Filters::InteractedPosts.register!
   CustomFeeds::Filters::FriendsLiked.register!
+  CustomFeeds::Filters::BlockedTags.register!
   CustomFeeds::RemovalStrategies::OnInteraction.register!
   CustomFeeds::OverflowStrategies::OldestFirst.register!
 

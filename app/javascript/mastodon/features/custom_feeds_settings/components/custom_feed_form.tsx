@@ -68,6 +68,7 @@ const stepLabels = defineMessages({
   none:                  { id: 'custom_feeds.option.none',                     defaultMessage: 'None' },
   interactedPosts:       { id: 'custom_feeds.filters.interacted_posts',        defaultMessage: 'Hide already-interacted posts' },
   friendsLiked:          { id: 'custom_feeds.filters.friends_liked',           defaultMessage: 'Only posts liked by people you follow' },
+  blockedTags:           { id: 'custom_feeds.filters.blocked_tags',            defaultMessage: 'Block by tag' },
   onInteraction:         { id: 'custom_feeds.removal_strategies.on_interaction', defaultMessage: 'Remove on interaction (favourite, boost, or reply)' },
   oldestFirst:           { id: 'custom_feeds.overflow.oldest_first',           defaultMessage: 'Remove oldest posts first' },
   noOverflow:            { id: 'custom_feeds.overflow.no_overflow',            defaultMessage: 'Stop adding new posts when full' },
@@ -102,6 +103,7 @@ const PHASE_OPTIONS: Record<CustomFeedPhase, StepOption[]> = {
   filter: [
     { value: 'interacted_posts', label: stepLabels.interactedPosts },
     { value: 'friends_liked',    label: stepLabels.friendsLiked    },
+    { value: 'blocked_tags',     label: stepLabels.blockedTags     },
   ],
   removal_strategy: [
     { value: 'on_interaction', label: stepLabels.onInteraction },
@@ -117,6 +119,7 @@ const DEFAULT_OPTIONS: Record<string, Record<string, unknown>> = {
   remote_tag_timeline:    { sources: [{ domain: '', tag: '' }], limit_per_run: 40 },
   remote_public_timeline: { sources: [{ domain: '', local_only: true }], limit_per_run: 40 },
   friends_liked:          { min_interactions: 1 },
+  blocked_tags:           { tags: [''] },
 };
 
 // ---------------------------------------------------------------------------

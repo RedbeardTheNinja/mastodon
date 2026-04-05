@@ -7,6 +7,7 @@ import DeleteIcon from '@/material-icons/400-24px/delete.svg?react';
 
 import { Icon } from 'mastodon/components/icon';
 
+import { BlockedTagsOptions } from './step_options/blocked_tags_options';
 import { FriendsLikedOptions } from './step_options/friends_liked_options';
 import { RemotePublicTimelineOptions } from './step_options/remote_public_timeline_options';
 import { RemoteTagTimelineOptions } from './step_options/remote_tag_timeline_options';
@@ -55,6 +56,9 @@ const StepOptionsForm = ({
   }
   if (stepType === 'friends_liked') {
     return <FriendsLikedOptions options={options} onChange={onChange} />;
+  }
+  if (stepType === 'blocked_tags') {
+    return <BlockedTagsOptions options={options} onChange={onChange} />;
   }
   return null;
 };
