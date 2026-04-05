@@ -19,7 +19,7 @@ module Recommendations
       return unless CustomFeedConfig.where(account: account, feed_type: 'algorithmic').exists?(enabled: true)
 
       status   = Status.find(status_id)
-      original = status.reblog? ? status.reblog : status
+      original = status.original_status
       weight   = WEIGHTS.fetch(interaction_type, 0.0)
       return if weight.zero?
 

@@ -40,10 +40,13 @@ module CustomFeeds
       max  = ::FeedManager::MAX_ITEMS
 
       # Deduplicate
-      return if redis.zscore(pkey, status.id)
+      if redis.zscore(pkey, status.id)
+        Rails.logger.debug { "CustomFeeds: status #{status.id} already in pending queue for list #{config.list_id}, skipping" }
+        return
+      end
 
       if redis.zcard(pkey) >= max
-        # Evict the oldest candidate (lowest score = earliest arrival)
+        Rails.logger.debug { "CustomFeeds: pending queue for list #{config.list_id} at capacity, evicting oldest" }
         redis.zpopmin(pkey)
       end
 
@@ -83,12 +86,27 @@ module CustomFeeds
       feed_key = key(config.list_id)
       max      = ::FeedManager::MAX_ITEMS
 
-      return false if overflow.at_capacity?(redis.zcard(feed_key), max)
+      if overflow.at_capacity?(redis.zcard(feed_key), max)
+        Rails.logger.debug do
+          "CustomFeeds: feed #{config.list_id} at capacity (overflow=#{overflow.class.name}), dropping status #{status.id}"
+        end
+        return false
+      end
 
       redis.zadd(feed_key, status.id, status.id)
       redis.hset(inserted_at_key(config.list_id), status.id, Time.now.to_i)
       overflow.trim(redis, feed_key, max)
       true
+    end
+
+    # Delete all Redis keys associated with a custom feed (feed data,
+    # insertion timestamps, algorithmic pending queue).
+    # Called when a CustomFeedConfig is destroyed.
+    # @param [Integer] list_id
+    # @return [void]
+    def delete_feed(list_id)
+      redis.del(key(list_id), inserted_at_key(list_id), pending_key(list_id))
+      Rails.logger.info("CustomFeeds: deleted Redis keys for list #{list_id}")
     end
 
     # Remove a single status ID from a custom feed.
@@ -133,7 +151,7 @@ module CustomFeeds
 
     def overflow_strategy_for(config)
       step = config.steps_for('overflow_strategy').first
-      klass = step ? OverflowStrategies::Base::REGISTRY[step.step_type] : nil
+      klass = step ? OverflowStrategies::Base.registry[step.step_type] : nil
       (klass || OverflowStrategies::OldestFirst).new
     end
   end

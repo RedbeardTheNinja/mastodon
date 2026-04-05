@@ -20,6 +20,8 @@ module CustomFeeds
       pipeline = CustomFeeds::Pipeline.new(config)
       return unless pipeline.pull_sources?
 
+      Rails.logger.info { "PullSourceIngestWorker: config=#{config_id} starting" }
+
       all_candidates = []
 
       pipeline.pull_source_entries.each do |entry|
@@ -35,6 +37,11 @@ module CustomFeeds
           cursor = CustomFeedPullCursor.for_step_bucket(step, bucket)
 
           result = source.fetch_candidates(account, options, since_id: cursor.last_fetched_id, bucket: bucket)
+
+          Rails.logger.debug do
+            "PullSourceIngestWorker: config=#{config_id} bucket=#{bucket.inspect} " \
+              "fetched=#{result.statuses.size} max_remote_id=#{result.max_remote_id.inspect}"
+          end
 
           # Always advance the cursor from the raw API response ID so we don't
           # re-fetch posts that failed to resolve (e.g. transient federation gaps).
@@ -52,7 +59,13 @@ module CustomFeeds
 
       seen = Set.new
       deduped = all_candidates.select { |s| seen.add?(s.id) }
+      Rails.logger.debug do
+        "PullSourceIngestWorker: config=#{config_id} total=#{all_candidates.size} " \
+          "after_dedup=#{deduped.size} (#{all_candidates.size - deduped.size} dupes removed)"
+      end
 
+      promoted = 0
+      filtered = 0
       deduped.each do |status|
         # Respect user-level blocks, mutes, and domain blocks.
         # We don't use FeedManager.filter(:home, ...) here because filter_from_home
@@ -62,7 +75,11 @@ module CustomFeeds
                 status.account.blocking?(account) ||
                 account.muting?(status.account) ||
                 account.domain_blocking?(status.account.domain)
-        next unless pipeline.passes_filters?(status, account)
+
+        unless pipeline.passes_filters?(status, account)
+          filtered += 1
+          next
+        end
 
         if pipeline.algorithmic?
           # Stage in the pending queue; the algorithm worker promotes to the feed.
@@ -72,9 +89,15 @@ module CustomFeeds
           CustomFeeds::FeedManager.instance.push_and_stream(config, status)
           CustomFeeds::Metrics.record_insert(feed_type: 'standard', result: 'pushed')
         end
+        promoted += 1
+      end
+
+      Rails.logger.info do
+        "PullSourceIngestWorker: config=#{config_id} promoted=#{promoted} filtered=#{filtered}"
       end
     rescue ActiveRecord::RecordNotFound
-      true
+      # Config or account was deleted before the job ran — expected, not an error.
+      Rails.logger.debug { "#{self.class.name}: record not found for config #{config_id}" }
     end
   end
 end

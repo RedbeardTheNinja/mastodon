@@ -3,15 +3,7 @@
 module CustomFeeds
   module Filters
     class Base
-      REGISTRY = {} # rubocop:disable Style/MutableConstant
-
-      def self.key
-        raise NotImplementedError
-      end
-
-      def self.register!
-        REGISTRY[key] = self
-      end
+      include CustomFeeds::Registerable
 
       # Return true to EXCLUDE this status from the feed.
       # @param [Status] status

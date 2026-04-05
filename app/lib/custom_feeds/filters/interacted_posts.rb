@@ -15,7 +15,7 @@ module CustomFeeds
       # @param [Hash] _options
       # @return [Boolean]
       def exclude?(status, account, _options = {})
-        original = status.reblog? ? status.reblog : status
+        original = status.original_status
 
         Favourite.exists?(account: account, status: original) ||
           Status.exists?(account: account, reblog_of_id: original.id) ||

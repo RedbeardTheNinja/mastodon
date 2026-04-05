@@ -13,7 +13,7 @@ module Recommendations
       algo_step = config.steps_for('algorithm').first
       return unless algo_step
 
-      algo_klass = Recommendations::Algorithms::REGISTRY[algo_step.step_type]
+      algo_klass = Recommendations::Algorithms::Base.registry[algo_step.step_type]
       return unless algo_klass
 
       account    = config.account
@@ -25,6 +25,11 @@ module Recommendations
         limit: options.fetch(:batch_size, 100).to_i,
         max_age_hours: options.fetch(:max_pending_age_hours, 48).to_i
       )
+
+      Rails.logger.info do
+        "AlgorithmicFeedWorker: config=#{config_id} account=#{account.id} dequeued=#{candidates.size}"
+      end
+
       return if candidates.empty?
 
       # Check min_signals gate before any scoring
@@ -33,29 +38,56 @@ module Recommendations
         required = min_signals_step.options.fetch('count', 5).to_i
         actual   = RecommendationSignal.where(account: account).count
         if actual < required
+          Rails.logger.info do
+            "AlgorithmicFeedWorker: config=#{config_id} skipped (min_signals: need #{required}, have #{actual})"
+          end
           candidates.size.times { CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_min_signals') }
           return
         end
       end
 
       scored = algo.score_batch(candidates)
+      scores = scored.pluck(:score)
+      Rails.logger.info do
+        "AlgorithmicFeedWorker: config=#{config_id} scored=#{scored.size} " \
+          "min=#{scores.min&.round(3)} max=#{scores.max&.round(3)} p50=#{percentile(scores, 50)&.round(3)}"
+      end
+
       before_filter = scored.size
       scored = apply_algorithmic_filters(scored, config)
-      (before_filter - scored.size).times { CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_score') }
+      filtered_score = before_filter - scored.size
+      filtered_score.times { CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_score') }
 
       # Run standard pipeline filters as a final gate before promotion
       pipeline = CustomFeeds::Pipeline.new(config)
+      promoted_count = 0
+      filtered_pipeline_count = 0
       scored.each do |result|
         if pipeline.passes_filters?(result[:status], account)
           CustomFeeds::FeedManager.instance.push_and_stream(config, result[:status])
           CustomFeeds::Metrics.record_algo_candidate(result: 'promoted')
+          promoted_count += 1
         else
           CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_pipeline')
+          filtered_pipeline_count += 1
         end
+      end
+
+      Rails.logger.info do
+        "AlgorithmicFeedWorker: config=#{config_id} " \
+          "promoted=#{promoted_count} filtered_score=#{filtered_score} filtered_pipeline=#{filtered_pipeline_count}"
       end
     end
 
     private
+
+    def percentile(values, pct)
+      return nil if values.empty?
+
+      sorted = values.sort
+      idx    = ((pct / 100.0) * (sorted.size - 1)).round
+      sorted[idx]
+    end
 
     def apply_algorithmic_filters(scored, config)
       config.steps_for('algorithmic_filter').each do |step|

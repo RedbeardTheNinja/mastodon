@@ -8,6 +8,13 @@ module CustomFeeds
       after_create_commit :enqueue_custom_feed_remove_if_interaction
     end
 
+    # Returns the original status, resolving through any reblog chain.
+    # Consistent helper used throughout the custom feeds pipeline.
+    # @return [Status]
+    def original_status
+      reblog? ? reblog : self
+    end
+
     private
 
     def enqueue_custom_feed_remove_if_interaction

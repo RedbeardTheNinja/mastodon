@@ -43,28 +43,35 @@ module CustomFeeds
       duration_minutes = step.options['duration_minutes'].to_i
       return if duration_minutes <= 0
 
-      cutoff    = duration_minutes.minutes.ago.to_i
-      feed_key  = CustomFeeds::FeedManager.instance.key(config.list_id)
-      hash_key  = CustomFeeds::FeedManager.instance.inserted_at_key(config.list_id)
-
-      # Load both the insertion-time hash and the current feed members.
-      entries      = redis.hgetall(hash_key) # { "id" => "timestamp", ... }
-      feed_members = redis.zrange(feed_key, 0, -1).to_set # { "id", ... }
+      cutoff   = duration_minutes.minutes.ago.to_i
+      feed_key = CustomFeeds::FeedManager.instance.key(config.list_id)
+      hash_key = CustomFeeds::FeedManager.instance.inserted_at_key(config.list_id)
 
       expired = []
       orphans = []
 
-      entries.each do |id_str, ts_str|
-        if feed_members.include?(id_str)
-          expired << id_str.to_i if ts_str.to_i <= cutoff
-        else
-          # Entry was removed from the feed by overflow trimming without going
-          # through FeedManager#remove — clean up the stale hash entry.
-          orphans << id_str
+      # Scan the insertion-time hash in cursor batches rather than loading the
+      # full feed into memory — O(N hash entries) with bounded per-iteration allocations.
+      cursor = '0'
+      loop do
+        cursor, pairs = redis.hscan(hash_key, cursor, count: 200)
+        pairs.each do |id_str, ts_str|
+          if redis.zscore(feed_key, id_str)
+            expired << id_str.to_i if ts_str.to_i <= cutoff
+          else
+            # Entry was removed from the feed by overflow trimming without going
+            # through FeedManager#remove — clean up the stale hash entry.
+            orphans << id_str
+          end
         end
+        break if cursor == '0'
       end
 
       redis.hdel(hash_key, *orphans) if orphans.any?
+
+      Rails.logger.debug do
+        "TimeBasedRemovalWorker: config=#{config.id} expired=#{expired.size} orphans=#{orphans.size}"
+      end
 
       return if expired.empty?
 

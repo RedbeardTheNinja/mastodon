@@ -3,15 +3,7 @@
 module CustomFeeds
   module RemovalStrategies
     class Base
-      REGISTRY = {} # rubocop:disable Style/MutableConstant
-
-      def self.key
-        raise NotImplementedError
-      end
-
-      def self.register!
-        REGISTRY[key] = self
-      end
+      include CustomFeeds::Registerable
 
       # Return true to remove the status from the feed after this interaction.
       # @param [String] interaction_type 'favourite' | 'reblog' | 'reply'

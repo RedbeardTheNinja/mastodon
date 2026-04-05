@@ -3,15 +3,7 @@
 module CustomFeeds
   module OverflowStrategies
     class Base
-      REGISTRY = {} # rubocop:disable Style/MutableConstant
-
-      def self.key
-        raise NotImplementedError
-      end
-
-      def self.register!
-        REGISTRY[key] = self
-      end
+      include CustomFeeds::Registerable
 
       # Return true to block insertion when the feed is already at capacity.
       # Called BEFORE zadd; if true, the status is not added.

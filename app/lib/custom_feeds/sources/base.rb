@@ -3,21 +3,13 @@
 module CustomFeeds
   module Sources
     class Base
-      REGISTRY = {} # rubocop:disable Style/MutableConstant
+      include CustomFeeds::Registerable
 
       # Returned by fetch_candidates.
       # max_remote_id — the highest ID seen in the raw API response (nil if none);
       #                 used to advance the cursor even when no statuses resolve.
       # statuses      — array of resolved Status records ready to push into the feed.
       FetchResult = Struct.new(:max_remote_id, :statuses)
-
-      def self.key
-        raise NotImplementedError
-      end
-
-      def self.register!
-        REGISTRY[key] = self
-      end
 
       # Override to true for sources that run on a schedule (not home-feed delivery).
       def self.pull_source?
@@ -67,7 +59,11 @@ module CustomFeeds
         Chewy.strategy(:bypass) do
           uris.filter_map do |uri|
             Status.find_by(uri: uri) || ResolveURLService.new.call(uri)
-          rescue
+          rescue ActivityPub::FetchRemoteActorService::Error,
+                 Mastodon::UnexpectedResponseError,
+                 HTTP::Error,
+                 OpenSSL::SSL::SSLError => e
+            Rails.logger.debug { "CustomFeeds: could not resolve #{uri}: #{e.message}" }
             nil
           end
         end

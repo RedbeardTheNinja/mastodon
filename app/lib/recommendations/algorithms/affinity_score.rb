@@ -11,15 +11,29 @@ module Recommendations
       end
 
       def score_batch(candidates)
-        # Load all signals once, cache for the batch
-        @tag_affinities     = load_signals('tag')
-        @account_affinities = load_signals('account')
-        @domain_affinities  = load_signals('domain')
+        # Load all signals in a single query and partition in Ruby
+        @tag_affinities     = {}
+        @account_affinities = {}
+        @domain_affinities  = {}
+
+        RecommendationSignal.where(account: @account).pluck(:signal_type, :entity_id, :weight).each do |type, entity, weight|
+          case type
+          when 'tag'     then @tag_affinities[entity]     = weight
+          when 'account' then @account_affinities[entity] = weight
+          when 'domain'  then @domain_affinities[entity]  = weight
+          end
+        end
+
+        Rails.logger.debug do
+          "AffinityScore: account=#{@account.id} " \
+            "tags=#{@tag_affinities.size} accounts=#{@account_affinities.size} domains=#{@domain_affinities.size}"
+        end
+
         super
       end
 
       def score_one(status)
-        original    = status.reblog? ? status.reblog : status
+        original    = status.original_status
         age_hours   = (Time.current - original.created_at) / 3600.0
         time_factor = Math.exp(-DECAY_LAMBDA * age_hours)
 
@@ -37,15 +51,6 @@ module Recommendations
                        end
 
         (tag_score + account_score + domain_score) * time_factor
-      end
-
-      private
-
-      def load_signals(signal_type)
-        RecommendationSignal
-          .where(account: @account, signal_type: signal_type)
-          .pluck(:entity_id, :weight)
-          .to_h
       end
     end
   end

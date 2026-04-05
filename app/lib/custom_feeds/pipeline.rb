@@ -7,12 +7,12 @@ module CustomFeeds
     # @param [CustomFeedConfig] config
     def initialize(config)
       @algorithmic     = config.feed_type == 'algorithmic'
-      @source_entries  = build_entries(config, 'source',           Sources::Base::REGISTRY)
-      @filter_entries  = build_entries(config, 'filter',           Filters::Base::REGISTRY)
-      @removal_entries = build_entries(config, 'removal_strategy', RemovalStrategies::Base::REGISTRY)
+      @source_entries  = build_entries(config, 'source',           Sources::Base.registry)
+      @filter_entries  = build_entries(config, 'filter',           Filters::Base.registry)
+      @removal_entries = build_entries(config, 'removal_strategy', RemovalStrategies::Base.registry)
 
       overflow_step  = config.steps_for('overflow_strategy').first
-      overflow_klass = overflow_step ? OverflowStrategies::Base::REGISTRY[overflow_step.step_type] : nil
+      overflow_klass = overflow_step ? OverflowStrategies::Base.registry[overflow_step.step_type] : nil
       @overflow = (overflow_klass || OverflowStrategies::OldestFirst).new
     end
 
@@ -23,10 +23,23 @@ module CustomFeeds
     # @return [Boolean]
     def include?(status, account)
       push = @source_entries.reject { |e| e[:klass].pull_source? }
-      return false if push.empty?
+      if push.empty?
+        Rails.logger.debug { "Pipeline: no push sources for config, skipping status #{status.id}" }
+        return false
+      end
 
-      push.any? { |e| e[:instance].includes?(status, account, e[:options]) } &&
-        @filter_entries.none? { |e| e[:instance].exclude?(status, account, e[:options]) }
+      unless push.any? { |e| e[:instance].includes?(status, account, e[:options]) }
+        Rails.logger.debug { "Pipeline: status #{status.id} rejected by all push sources" }
+        return false
+      end
+
+      blocking = @filter_entries.find { |e| e[:instance].exclude?(status, account, e[:options]) }
+      if blocking
+        Rails.logger.debug { "Pipeline: status #{status.id} excluded by filter #{blocking[:klass].key}" }
+        return false
+      end
+
+      true
     end
 
     # Called by PullSourceIngestWorker for candidates already sourced by a pull source.
@@ -35,7 +48,13 @@ module CustomFeeds
     # @param [Account] account
     # @return [Boolean]
     def passes_filters?(status, account)
-      @filter_entries.none? { |e| e[:instance].exclude?(status, account, e[:options]) }
+      blocking = @filter_entries.find { |e| e[:instance].exclude?(status, account, e[:options]) }
+      if blocking
+        Rails.logger.debug { "Pipeline: status #{status.id} excluded by filter #{blocking[:klass].key}" }
+        return false
+      end
+
+      true
     end
 
     # Returns true if this pipeline has at least one pull source step.

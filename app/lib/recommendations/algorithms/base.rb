@@ -2,16 +2,8 @@
 
 module Recommendations
   module Algorithms
-    REGISTRY = {} # rubocop:disable Style/MutableConstant
-
     class Base
-      def self.key
-        raise NotImplementedError
-      end
-
-      def self.register!
-        REGISTRY[key] = self
-      end
+      include CustomFeeds::Registerable
 
       # @param [Account] account — the account who owns the feed
       def initialize(account)

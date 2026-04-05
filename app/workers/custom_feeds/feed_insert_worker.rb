@@ -38,7 +38,8 @@ module CustomFeeds
         end
       end
     rescue ActiveRecord::RecordNotFound
-      true
+      # Status or account was deleted before the job ran — expected, not an error.
+      Rails.logger.debug { "#{self.class.name}: record not found (status=#{status_id} account=#{account_id})" }
     end
   end
 end

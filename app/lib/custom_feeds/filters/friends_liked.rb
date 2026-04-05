@@ -18,15 +18,19 @@ module CustomFeeds
       # @return [Boolean]
       def exclude?(status, account, options = {})
         min  = (options['min_interactions'] || 1).to_i
-        orig = status.reblog? ? status.reblog : status
+        orig = status.original_status
 
-        following_ids = account.following.pluck(:id)
+        # Cache following IDs for the lifetime of this filter instance (one per
+        # pipeline build / worker job) to avoid N+1 queries across candidates.
+        @following_ids_cache ||= {}
+        following_ids = @following_ids_cache[account.id] ||= account.following.pluck(:id).to_set
         return true if following_ids.empty?
 
-        fav_count    = Favourite.where(account_id: following_ids, status_id: orig.id).count
+        fav_ids = following_ids.to_a
+        fav_count    = Favourite.where(account_id: fav_ids, status_id: orig.id).count
         return false if fav_count >= min
 
-        reblog_count = Status.where(account_id: following_ids, reblog_of_id: orig.id).count
+        reblog_count = Status.where(account_id: fav_ids, reblog_of_id: orig.id).count
         (fav_count + reblog_count) < min
       end
     end

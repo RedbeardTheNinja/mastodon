@@ -20,7 +20,7 @@ module CustomFeeds
         blocked = Array(options['tags']).map { |t| t.to_s.delete_prefix('#').downcase }.presence
         return false if blocked.nil?
 
-        original = status.reblog? ? status.reblog : status
+        original = status.original_status
         status_tags = original.tags.pluck(:name).map(&:downcase)
         (status_tags & blocked).any?
       end

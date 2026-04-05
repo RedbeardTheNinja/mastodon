@@ -21,6 +21,8 @@ class CustomFeedConfig < ApplicationRecord
 
   has_many :custom_feed_steps, dependent: :destroy
 
+  after_destroy :cleanup_redis_keys
+
   validates :list_id, uniqueness: true
 
   scope :enabled,      -> { where(enabled: true) }
@@ -34,5 +36,11 @@ class CustomFeedConfig < ApplicationRecord
   # @return [ActiveRecord::Relation<CustomFeedStep>]
   def steps_for(phase)
     custom_feed_steps.where(phase: phase).order(:position)
+  end
+
+  private
+
+  def cleanup_redis_keys
+    CustomFeeds::FeedManager.instance.delete_feed(list_id)
   end
 end

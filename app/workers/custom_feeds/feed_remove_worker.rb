@@ -21,9 +21,14 @@ module CustomFeeds
         next unless pipeline.remove_on?(interaction_type)
 
         CustomFeeds::FeedManager.instance.remove_and_stream(config, ids_to_remove)
+      rescue => e
+        Rails.logger.error(
+          "#{self.class.name} failed for config #{config.id}: #{e.class}: #{e.message}"
+        )
       end
     rescue ActiveRecord::RecordNotFound
-      true
+      # Account was deleted before the job ran — expected, not an error.
+      Rails.logger.debug { "#{self.class.name}: account #{account_id} not found, skipping" }
     end
   end
 end
