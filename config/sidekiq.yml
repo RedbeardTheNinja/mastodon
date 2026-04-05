@@ -76,3 +76,7 @@
       every: '5m'
       class: CustomFeeds::SchedulePullSourcesWorker
       queue: scheduler
+    custom_feeds_time_based_removal:
+      every: '5m'
+      class: CustomFeeds::TimeBasedRemovalWorker
+      queue: scheduler

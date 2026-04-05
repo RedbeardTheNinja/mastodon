@@ -9,6 +9,7 @@ Rails.application.config.to_prepare do
   CustomFeeds::Filters::FriendsLiked.register!
   CustomFeeds::Filters::BlockedTags.register!
   CustomFeeds::RemovalStrategies::OnInteraction.register!
+  CustomFeeds::RemovalStrategies::TimeBased.register!
   CustomFeeds::OverflowStrategies::OldestFirst.register!
 
   # Wire concerns into existing classes

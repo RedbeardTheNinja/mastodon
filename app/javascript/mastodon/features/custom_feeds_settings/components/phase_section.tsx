@@ -11,6 +11,7 @@ import { BlockedTagsOptions } from './step_options/blocked_tags_options';
 import { FriendsLikedOptions } from './step_options/friends_liked_options';
 import { RemotePublicTimelineOptions } from './step_options/remote_public_timeline_options';
 import { RemoteTagTimelineOptions } from './step_options/remote_tag_timeline_options';
+import { TimeBasedOptions } from './step_options/time_based_options';
 
 const messages = defineMessages({
   removeStep: {
@@ -59,6 +60,9 @@ const StepOptionsForm = ({
   }
   if (stepType === 'blocked_tags') {
     return <BlockedTagsOptions options={options} onChange={onChange} />;
+  }
+  if (stepType === 'time_based') {
+    return <TimeBasedOptions options={options} onChange={onChange} />;
   }
   return null;
 };

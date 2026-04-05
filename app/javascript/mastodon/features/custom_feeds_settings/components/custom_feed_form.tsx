@@ -70,6 +70,7 @@ const stepLabels = defineMessages({
   friendsLiked:          { id: 'custom_feeds.filters.friends_liked',           defaultMessage: 'Only posts liked by people you follow' },
   blockedTags:           { id: 'custom_feeds.filters.blocked_tags',            defaultMessage: 'Block by tag' },
   onInteraction:         { id: 'custom_feeds.removal_strategies.on_interaction', defaultMessage: 'Remove on interaction (favourite, boost, or reply)' },
+  timeBased:             { id: 'custom_feeds.removal_strategies.time_based',     defaultMessage: 'Remove after a set time' },
   oldestFirst:           { id: 'custom_feeds.overflow.oldest_first',           defaultMessage: 'Remove oldest posts first' },
   noOverflow:            { id: 'custom_feeds.overflow.no_overflow',            defaultMessage: 'Stop adding new posts when full' },
 });
@@ -107,6 +108,7 @@ const PHASE_OPTIONS: Record<CustomFeedPhase, StepOption[]> = {
   ],
   removal_strategy: [
     { value: 'on_interaction', label: stepLabels.onInteraction },
+    { value: 'time_based',     label: stepLabels.timeBased     },
   ],
   overflow_strategy: [
     { value: 'oldest_first', label: stepLabels.oldestFirst },
@@ -120,6 +122,7 @@ const DEFAULT_OPTIONS: Record<string, Record<string, unknown>> = {
   remote_public_timeline: { sources: [{ domain: '', local_only: true }], limit_per_run: 40 },
   friends_liked:          { min_interactions: 1 },
   blocked_tags:           { tags: [''] },
+  time_based:             { duration_minutes: 60 },
 };
 
 // ---------------------------------------------------------------------------
