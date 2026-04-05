@@ -4,12 +4,13 @@ Server-specific features and modifications built on top of the Mastodon source c
 
 ## Features
 
-| Feature                                                      | Description                                                                                                                                                       |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Custom Feeds System](custom-feeds.md)                       | Extensible pluggable-pipeline system for custom algorithmic feeds backed by any Mastodon List                                                                     |
-| [Algorithmic Feeds](recommendations.md)                      | New `algorithmic` feed type that stages candidates in a pending queue, scores them with pluggable algorithms (affinity scoring, optional Naive Bayes via `rumale`), and applies score-aware filters before promotion. Signals are collected from boosts, replies, and likes. |
-| [Plugin Plan](plugin-plan.md)                                | Plan for extracting Custom Feeds into a standalone Rails Engine gem (`mastodon-custom-feeds`)                                                                     |
-| [Multi-Provider & Pull Sources Plan](multi-provider-plan.md) | **Fully implemented.** Pull source workers, multiple providers per lifecycle phase, singleton enforcement, NSFW seed task — all shipped.                          |
+| Feature                                                      | Description                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Custom Feeds System](custom-feeds.md)                       | Extensible pluggable-pipeline system for custom algorithmic feeds backed by any Mastodon List. Includes push and pull sources, multiple filter types, removal strategies, overflow strategies, and algorithmic feeds.                                 |
+| [Algorithmic Feeds](recommendations.md)                      | `algorithmic` feed type that stages candidates in a pending queue, scores them with pluggable algorithms (affinity scoring implemented; Naive Bayes future work), and applies score-aware filters. Signals collected from boosts, replies, and likes. |
+| [Monitoring](monitoring.md)                                  | Prometheus/Grafana stack measuring custom feed performance impact vs home feed baseline. Scrapes Rails, Sidekiq, Redis, and system metrics from the production server.                                                                                |
+| [Plugin Plan](plugin-plan.md)                                | Plan for extracting Custom Feeds into a standalone Rails Engine gem (`mastodon-custom-feeds`)                                                                                                                                                         |
+| [Multi-Provider & Pull Sources Plan](multi-provider-plan.md) | **Fully implemented.** Pull source workers, multiple providers per lifecycle phase, singleton enforcement, NSFW seed task — all shipped.                                                                                                              |
 
 ---
 
@@ -21,12 +22,12 @@ Changes that do not belong to a specific named feature — configuration, toolin
 
 AI assistant context files checked into the repo so Claude Code has accurate environment knowledge across sessions.
 
-| File | Purpose |
-| ---- | ------- |
-| `CLAUDE.md` | Root project instructions: stack overview, command reference, architecture notes, key conventions (constant resolution, reblog normalisation, etc.) |
-| `.claude/env-dev-container.md` | Environment guide for the Windows/Docker dev container (`devcontainer-app-1`). Describes how to run commands, apply migrations, restart services, and deploy. |
-| `.claude/env-production.md` | Environment guide for the production server (`redbeardthe.ninja`). Covers rbenv Ruby, systemd service management, deploy commands, and default `sudo -u mastodon` convention. |
-| `.claude/settings.local.json` | Local Claude Code settings (tool permissions, hooks). Not committed on main — present only on `personal`. |
+| File                           | Purpose                                                                                                                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE.md`                    | Root project instructions: stack overview, command reference, architecture notes, key conventions (constant resolution, reblog normalisation, etc.)                           |
+| `.claude/env-dev-container.md` | Environment guide for the Windows/Docker dev container (`devcontainer-app-1`). Describes how to run commands, apply migrations, restart services, and deploy.                 |
+| `.claude/env-production.md`    | Environment guide for the production server (`redbeardthe.ninja`). Covers rbenv Ruby, systemd service management, deploy commands, and default `sudo -u mastodon` convention. |
+| `.claude/settings.local.json`  | Local Claude Code settings (tool permissions, hooks). Not committed on main — present only on `personal`.                                                                     |
 
 ### Rubocop overrides (`.rubocop.yml`)
 
@@ -40,15 +41,15 @@ Root-level reference document tracing the full journey of a remote post from Act
 
 The Custom Feeds settings page is a new React route added to the main SPA. The following files were changed to integrate it:
 
-| File | Change |
-| ---- | ------ |
-| `app/javascript/mastodon/features/navigation_panel/index.tsx` | Added "Custom Feeds" nav link (tune icon, `/custom_feeds` route) |
-| `app/javascript/mastodon/features/ui/index.jsx` | Registered `<WrappedRoute path='/custom_feeds'>` pointing to `CustomFeedsSettings` |
-| `app/javascript/mastodon/features/ui/util/async-components.js` | Added `CustomFeedsSettings` async import for code-splitting |
-| `app/javascript/mastodon/actions/streaming.js` | Added `feeds.remove` streaming event handler — removes a status only from the specific list timeline (not all timelines) via `timelineDeleteStatus` |
-| `app/javascript/styles/mastodon/components.scss` | Added `.phase-section` styles for the custom feed step editor |
-| `app/javascript/styles/mastodon/forms.scss` | Minor `color-scheme: inherit` fix for select inputs in the feed settings form |
-| `app/javascript/mastodon/components/form_fields/select.module.scss` | Select field stylesheet used by the custom feed form |
+| File                                                                | Change                                                                                                                                              |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/javascript/mastodon/features/navigation_panel/index.tsx`       | Added "Custom Feeds" nav link (tune icon, `/custom_feeds` route)                                                                                    |
+| `app/javascript/mastodon/features/ui/index.jsx`                     | Registered `<WrappedRoute path='/custom_feeds'>` pointing to `CustomFeedsSettings`                                                                  |
+| `app/javascript/mastodon/features/ui/util/async-components.js`      | Added `CustomFeedsSettings` async import for code-splitting                                                                                         |
+| `app/javascript/mastodon/actions/streaming.js`                      | Added `feeds.remove` streaming event handler — removes a status only from the specific list timeline (not all timelines) via `timelineDeleteStatus` |
+| `app/javascript/styles/mastodon/components.scss`                    | Added `.phase-section` styles for the custom feed step editor                                                                                       |
+| `app/javascript/styles/mastodon/forms.scss`                         | Minor `color-scheme: inherit` fix for select inputs in the feed settings form                                                                       |
+| `app/javascript/mastodon/components/form_fields/select.module.scss` | Select field stylesheet used by the custom feed form                                                                                                |
 
 ### Development seed task (`lib/tasks/dev.rake` — `dev:seed_custom_feeds`)
 
