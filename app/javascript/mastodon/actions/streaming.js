@@ -111,6 +111,7 @@ export const connectTimelineStream = (timelineId, channelName, params = {}, opti
           dispatch(deleteFromTimelines(data.payload));
           break;
         case 'feeds.remove':
+          // @ts-expect-error
           dispatch(timelineDeleteStatus({ statusId: data.payload, timelineKey: timelineId }));
           break;
         case 'notification': {
