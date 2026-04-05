@@ -72,3 +72,7 @@
       interval: 1 day
       class: Scheduler::Fasp::FollowRecommendationCleanupScheduler
       queue: scheduler
+    custom_feeds_pull_sources:
+      every: '5m'
+      class: CustomFeeds::SchedulePullSourcesWorker
+      queue: scheduler
