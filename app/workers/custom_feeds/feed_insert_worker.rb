@@ -28,7 +28,11 @@ module CustomFeeds
           pipeline = CustomFeeds::Pipeline.new(config)
           next unless pipeline.include?(@status, @account)
 
-          CustomFeeds::FeedManager.instance.push_and_stream(config, @status)
+          if pipeline.algorithmic?
+            CustomFeeds::FeedManager.instance.enqueue_candidate(config, @status)
+          else
+            CustomFeeds::FeedManager.instance.push_and_stream(config, @status)
+          end
         end
       end
     rescue ActiveRecord::RecordNotFound

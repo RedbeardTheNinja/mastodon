@@ -6,6 +6,7 @@
 #
 #  id                   :bigint(8)        not null, primary key
 #  enabled              :boolean          default(TRUE), not null
+#  feed_type            :string           default("standard"), not null
 #  last_pulled_at       :datetime
 #  pull_cadence_minutes :integer          default(15), not null
 #  created_at           :datetime         not null
@@ -22,7 +23,11 @@ class CustomFeedConfig < ApplicationRecord
 
   validates :list_id, uniqueness: true
 
-  scope :enabled, -> { where(enabled: true) }
+  scope :enabled,      -> { where(enabled: true) }
+  scope :standard,     -> { where(feed_type: 'standard') }
+  scope :algorithmic,  -> { where(feed_type: 'algorithmic') }
+
+  validates :feed_type, inclusion: { in: %w(standard algorithmic) }
 
   # Returns steps for a given phase, ordered by position.
   # @param [String] phase one of 'source', 'filter', 'removal_strategy', 'overflow_strategy'

@@ -80,3 +80,7 @@
       every: '5m'
       class: CustomFeeds::TimeBasedRemovalWorker
       queue: scheduler
+    recommendations_algorithmic_feeds:
+      every: '5m'
+      class: Recommendations::ScheduleAlgorithmicFeedsWorker
+      queue: scheduler

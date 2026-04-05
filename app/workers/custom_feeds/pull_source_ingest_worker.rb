@@ -64,7 +64,12 @@ module CustomFeeds
                 account.domain_blocking?(status.account.domain)
         next unless pipeline.passes_filters?(status, account)
 
-        CustomFeeds::FeedManager.instance.push_and_stream(config, status)
+        if pipeline.algorithmic?
+          # Stage in the pending queue; the algorithm worker promotes to the feed.
+          CustomFeeds::FeedManager.instance.enqueue_candidate(config, status)
+        else
+          CustomFeeds::FeedManager.instance.push_and_stream(config, status)
+        end
       end
     rescue ActiveRecord::RecordNotFound
       true

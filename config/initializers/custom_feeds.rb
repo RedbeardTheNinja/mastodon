@@ -11,6 +11,7 @@ Rails.application.config.to_prepare do
   CustomFeeds::RemovalStrategies::OnInteraction.register!
   CustomFeeds::RemovalStrategies::TimeBased.register!
   CustomFeeds::OverflowStrategies::OldestFirst.register!
+  Recommendations::Algorithms::AffinityScore.register!
 
   # Wire concerns into existing classes
   Api::V1::Timelines::ListController.prepend(CustomFeeds::ListControllerConcern)

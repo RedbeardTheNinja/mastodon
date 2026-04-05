@@ -22,6 +22,7 @@ class Api::V1::CustomFeedsController < Api::BaseController
     @config = CustomFeedConfig.new(
       account: current_account,
       list: list,
+      feed_type: params.fetch(:feed_type, 'standard'),
       enabled: params.fetch(:enabled, true),
       pull_cadence_minutes: params.fetch(:pull_cadence_minutes, 15).to_i
     )
@@ -36,6 +37,7 @@ class Api::V1::CustomFeedsController < Api::BaseController
 
   def update
     @config.enabled = params[:enabled] if params.key?(:enabled)
+    @config.feed_type = params[:feed_type] if params.key?(:feed_type)
     @config.pull_cadence_minutes = params[:pull_cadence_minutes].to_i if params.key?(:pull_cadence_minutes)
 
     ActiveRecord::Base.transaction do

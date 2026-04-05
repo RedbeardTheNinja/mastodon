@@ -22,6 +22,57 @@ module CustomFeeds
       "feed:custom:#{list_id}:inserted_at"
     end
 
+    # Redis key for the algorithmic pending queue.
+    # Sorted set: score = unix arrival timestamp, member = status_id.
+    # @param [Integer] list_id
+    # @return [String]
+    def pending_key(list_id)
+      "feed:algo:#{list_id}:pending"
+    end
+
+    # Add a status to the algorithmic pending queue if not already present.
+    # Caps the queue at FeedManager::MAX_ITEMS; evicts the oldest entry on overflow.
+    # @param [CustomFeedConfig] config
+    # @param [Status] status
+    # @return [void]
+    def enqueue_candidate(config, status)
+      pkey = pending_key(config.list_id)
+      max  = ::FeedManager::MAX_ITEMS
+
+      # Deduplicate
+      return if redis.zscore(pkey, status.id)
+
+      if redis.zcard(pkey) >= max
+        # Evict the oldest candidate (lowest score = earliest arrival)
+        redis.zpopmin(pkey)
+      end
+
+      redis.zadd(pkey, Time.now.to_i, status.id)
+    end
+
+    # Dequeue up to `limit` candidates from the pending queue that are younger
+    # than `max_age_hours`. Older entries are removed without scoring.
+    # Returns resolved Status records (skips IDs that no longer exist in the DB).
+    # @param [Integer] list_id
+    # @param [Integer] limit
+    # @param [Integer] max_age_hours
+    # @return [Array<Status>]
+    def dequeue_pending(list_id, limit:, max_age_hours:)
+      pkey   = pending_key(list_id)
+      cutoff = Time.now.to_i - (max_age_hours * 3600)
+
+      # Remove entries older than the max age
+      redis.zremrangebyscore(pkey, '-inf', cutoff)
+
+      # Pop the oldest `limit` entries from the queue (lowest score first)
+      entries = redis.zpopmin(pkey, limit)
+      ids     = entries.map { |member, _score| member.to_i }
+
+      return [] if ids.empty?
+
+      Status.where(id: ids).to_a
+    end
+
     # Add a status to a custom feed, respecting the config's overflow strategy.
     # Returns false without inserting if the overflow strategy blocks capacity.
     # @param [CustomFeedConfig] config

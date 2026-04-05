@@ -16,6 +16,7 @@ import type {
   ApiCustomFeedConfigJSON,
   ApiCustomFeedStepInputJSON,
   CustomFeedPhase,
+  CustomFeedType,
 } from 'mastodon/api_types/custom_feeds';
 
 import { PhaseSection } from './phase_section';
@@ -48,16 +49,34 @@ const messages = defineMessages({
     id: 'custom_feeds.form.pull_cadence_hint',
     defaultMessage: 'How often to fetch new posts from remote sources.',
   },
+  feedTypeLabel: {
+    id: 'custom_feeds.form.feed_type',
+    defaultMessage: 'Feed type',
+  },
+  feedTypeStandard: {
+    id: 'custom_feeds.form.feed_type_standard',
+    defaultMessage: 'Standard — filter and push posts directly',
+  },
+  feedTypeAlgorithmic: {
+    id: 'custom_feeds.form.feed_type_algorithmic',
+    defaultMessage: 'Algorithmic — score and rank posts before promoting',
+  },
   // Phase labels
-  sourcePhase:   { id: 'custom_feeds.form.source',            defaultMessage: 'Post sources' },
-  filterPhase:   { id: 'custom_feeds.form.filter',            defaultMessage: 'Filters' },
-  removalPhase:  { id: 'custom_feeds.form.removal_strategy',  defaultMessage: 'Removal strategy' },
-  overflowPhase: { id: 'custom_feeds.form.overflow_strategy', defaultMessage: 'When feed is full' },
+  sourcePhase:             { id: 'custom_feeds.form.source',               defaultMessage: 'Post sources' },
+  filterPhase:             { id: 'custom_feeds.form.filter',               defaultMessage: 'Filters' },
+  preFilterPhase:          { id: 'custom_feeds.form.pre_filter',           defaultMessage: 'Pre-filters' },
+  algorithmPhase:          { id: 'custom_feeds.form.algorithm',            defaultMessage: 'Algorithm' },
+  algorithmicFilterPhase:  { id: 'custom_feeds.form.algorithmic_filter',   defaultMessage: 'Algorithmic filters' },
+  removalPhase:            { id: 'custom_feeds.form.removal_strategy',     defaultMessage: 'Removal strategy' },
+  overflowPhase:           { id: 'custom_feeds.form.overflow_strategy',    defaultMessage: 'When feed is full' },
   // Add-step labels
-  addSource:   { id: 'custom_feeds.phase.source.add',            defaultMessage: 'Add source…' },
-  addFilter:   { id: 'custom_feeds.phase.filter.add',            defaultMessage: 'Add filter…' },
-  addRemoval:  { id: 'custom_feeds.phase.removal_strategy.add',  defaultMessage: 'Add removal rule…' },
-  addOverflow: { id: 'custom_feeds.phase.overflow_strategy.add', defaultMessage: 'Set overflow rule…' },
+  addSource:             { id: 'custom_feeds.phase.source.add',               defaultMessage: 'Add source…' },
+  addFilter:             { id: 'custom_feeds.phase.filter.add',               defaultMessage: 'Add filter…' },
+  addPreFilter:          { id: 'custom_feeds.phase.pre_filter.add',           defaultMessage: 'Add pre-filter…' },
+  addAlgorithm:          { id: 'custom_feeds.phase.algorithm.add',            defaultMessage: 'Choose algorithm…' },
+  addAlgorithmicFilter:  { id: 'custom_feeds.phase.algorithmic_filter.add',   defaultMessage: 'Add algorithmic filter…' },
+  addRemoval:            { id: 'custom_feeds.phase.removal_strategy.add',     defaultMessage: 'Add removal rule…' },
+  addOverflow:           { id: 'custom_feeds.phase.overflow_strategy.add',    defaultMessage: 'Set overflow rule…' },
 });
 
 // All step type labels must be statically defined here for the babel plugin.
@@ -73,6 +92,10 @@ const stepLabels = defineMessages({
   timeBased:             { id: 'custom_feeds.removal_strategies.time_based',     defaultMessage: 'Remove after a set time' },
   oldestFirst:           { id: 'custom_feeds.overflow.oldest_first',           defaultMessage: 'Remove oldest posts first' },
   noOverflow:            { id: 'custom_feeds.overflow.no_overflow',            defaultMessage: 'Stop adding new posts when full' },
+  affinityScore:         { id: 'custom_feeds.algorithms.affinity_score',       defaultMessage: 'Affinity score — weighted interactions with time decay' },
+  minScore:              { id: 'custom_feeds.algorithmic_filters.min_score',   defaultMessage: 'Minimum score threshold' },
+  topKPerBatch:          { id: 'custom_feeds.algorithmic_filters.top_k_per_batch', defaultMessage: 'Limit posts per run' },
+  minSignals:            { id: 'custom_feeds.algorithmic_filters.min_signals', defaultMessage: 'Require minimum signals before starting' },
 });
 
 // Cadence option labels
@@ -106,6 +129,14 @@ const PHASE_OPTIONS: Record<CustomFeedPhase, StepOption[]> = {
     { value: 'friends_liked',    label: stepLabels.friendsLiked    },
     { value: 'blocked_tags',     label: stepLabels.blockedTags     },
   ],
+  algorithm: [
+    { value: 'affinity_score', label: stepLabels.affinityScore },
+  ],
+  algorithmic_filter: [
+    { value: 'min_score',       label: stepLabels.minScore      },
+    { value: 'top_k_per_batch', label: stepLabels.topKPerBatch  },
+    { value: 'min_signals',     label: stepLabels.minSignals    },
+  ],
   removal_strategy: [
     { value: 'on_interaction', label: stepLabels.onInteraction },
     { value: 'time_based',     label: stepLabels.timeBased     },
@@ -123,6 +154,10 @@ const DEFAULT_OPTIONS: Record<string, Record<string, unknown>> = {
   friends_liked:          { min_interactions: 1 },
   blocked_tags:           { tags: [''] },
   time_based:             { duration_minutes: 60 },
+  affinity_score:         { batch_size: 100, max_pending_age_hours: 48 },
+  min_score:              { threshold: 0.1 },
+  top_k_per_batch:        { k: 10 },
+  min_signals:            { count: 5 },
 };
 
 // ---------------------------------------------------------------------------
@@ -161,14 +196,17 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
   const lists = useAppSelector((state) => getOrderedLists(state));
 
   const [listId,     setListId]     = useState(config?.list_id ?? '');
+  const [feedType,   setFeedType]   = useState<CustomFeedType>(config?.feed_type ?? 'standard');
   const [enabled,    setEnabled]    = useState(config?.enabled ?? true);
   const [cadence,    setCadence]    = useState(String(config?.pull_cadence_minutes ?? 15));
   const [submitting, setSubmitting] = useState(false);
 
-  const [sourceDrafts,   setSourceDrafts]   = useState<StepDraft[]>(() => stepsFor(config, 'source'));
-  const [filterDrafts,   setFilterDrafts]   = useState<StepDraft[]>(() => stepsFor(config, 'filter'));
-  const [removalDrafts,  setRemovalDrafts]  = useState<StepDraft[]>(() => stepsFor(config, 'removal_strategy'));
-  const [overflowDrafts, setOverflowDrafts] = useState<StepDraft[]>(() => stepsFor(config, 'overflow_strategy'));
+  const [sourceDrafts,             setSourceDrafts]             = useState<StepDraft[]>(() => stepsFor(config, 'source'));
+  const [filterDrafts,             setFilterDrafts]             = useState<StepDraft[]>(() => stepsFor(config, 'filter'));
+  const [algorithmDrafts,          setAlgorithmDrafts]          = useState<StepDraft[]>(() => stepsFor(config, 'algorithm'));
+  const [algorithmicFilterDrafts,  setAlgorithmicFilterDrafts]  = useState<StepDraft[]>(() => stepsFor(config, 'algorithmic_filter'));
+  const [removalDrafts,            setRemovalDrafts]            = useState<StepDraft[]>(() => stepsFor(config, 'removal_strategy'));
+  const [overflowDrafts,           setOverflowDrafts]           = useState<StepDraft[]>(() => stepsFor(config, 'overflow_strategy'));
 
   // -- Per-phase callbacks ---------------------------------------------------
 
@@ -201,29 +239,37 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
     [],
   );
 
-  const addSource   = useCallback(makeAdd(setSourceDrafts),   [makeAdd]);
-  const addFilter   = useCallback(makeAdd(setFilterDrafts),   [makeAdd]);
-  const addRemoval  = useCallback(makeAdd(setRemovalDrafts),  [makeAdd]);
-  const addOverflow = useCallback(makeAdd(setOverflowDrafts), [makeAdd]);
+  const addSource             = useCallback(makeAdd(setSourceDrafts),            [makeAdd]);
+  const addFilter             = useCallback(makeAdd(setFilterDrafts),            [makeAdd]);
+  const addAlgorithm          = useCallback(makeAdd(setAlgorithmDrafts),         [makeAdd]);
+  const addAlgorithmicFilter  = useCallback(makeAdd(setAlgorithmicFilterDrafts), [makeAdd]);
+  const addRemoval            = useCallback(makeAdd(setRemovalDrafts),           [makeAdd]);
+  const addOverflow           = useCallback(makeAdd(setOverflowDrafts),          [makeAdd]);
 
-  const removeSource   = useCallback(makeRemove(setSourceDrafts),   [makeRemove]);
-  const removeFilter   = useCallback(makeRemove(setFilterDrafts),   [makeRemove]);
-  const removeRemoval  = useCallback(makeRemove(setRemovalDrafts),  [makeRemove]);
-  const removeOverflow = useCallback(makeRemove(setOverflowDrafts), [makeRemove]);
+  const removeSource             = useCallback(makeRemove(setSourceDrafts),            [makeRemove]);
+  const removeFilter             = useCallback(makeRemove(setFilterDrafts),            [makeRemove]);
+  const removeAlgorithm          = useCallback(makeRemove(setAlgorithmDrafts),         [makeRemove]);
+  const removeAlgorithmicFilter  = useCallback(makeRemove(setAlgorithmicFilterDrafts), [makeRemove]);
+  const removeRemoval            = useCallback(makeRemove(setRemovalDrafts),           [makeRemove]);
+  const removeOverflow           = useCallback(makeRemove(setOverflowDrafts),          [makeRemove]);
 
-  const changeSourceOptions   = useCallback(makeOptionsChange(setSourceDrafts),   [makeOptionsChange]);
-  const changeFilterOptions   = useCallback(makeOptionsChange(setFilterDrafts),   [makeOptionsChange]);
-  const changeRemovalOptions  = useCallback(makeOptionsChange(setRemovalDrafts),  [makeOptionsChange]);
-  const changeOverflowOptions = useCallback(makeOptionsChange(setOverflowDrafts), [makeOptionsChange]);
+  const changeSourceOptions            = useCallback(makeOptionsChange(setSourceDrafts),            [makeOptionsChange]);
+  const changeFilterOptions            = useCallback(makeOptionsChange(setFilterDrafts),            [makeOptionsChange]);
+  const changeAlgorithmOptions         = useCallback(makeOptionsChange(setAlgorithmDrafts),         [makeOptionsChange]);
+  const changeAlgorithmicFilterOptions = useCallback(makeOptionsChange(setAlgorithmicFilterDrafts), [makeOptionsChange]);
+  const changeRemovalOptions           = useCallback(makeOptionsChange(setRemovalDrafts),           [makeOptionsChange]);
+  const changeOverflowOptions          = useCallback(makeOptionsChange(setOverflowDrafts),          [makeOptionsChange]);
 
   // -- Build steps payload ---------------------------------------------------
 
   const buildSteps = useCallback((): ApiCustomFeedStepInputJSON[] => {
     const allDrafts: { phase: CustomFeedPhase; drafts: StepDraft[] }[] = [
-      { phase: 'source',            drafts: sourceDrafts   },
-      { phase: 'filter',            drafts: filterDrafts   },
-      { phase: 'removal_strategy',  drafts: removalDrafts  },
-      { phase: 'overflow_strategy', drafts: overflowDrafts },
+      { phase: 'source',            drafts: sourceDrafts            },
+      { phase: 'filter',            drafts: filterDrafts            },
+      { phase: 'algorithm',         drafts: algorithmDrafts         },
+      { phase: 'algorithmic_filter', drafts: algorithmicFilterDrafts },
+      { phase: 'removal_strategy',  drafts: removalDrafts           },
+      { phase: 'overflow_strategy', drafts: overflowDrafts          },
     ];
 
     return allDrafts.flatMap(({ phase, drafts }) =>
@@ -234,7 +280,7 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
         options: d.options,
       })),
     );
-  }, [sourceDrafts, filterDrafts, removalDrafts, overflowDrafts]);
+  }, [sourceDrafts, filterDrafts, algorithmDrafts, algorithmicFilterDrafts, removalDrafts, overflowDrafts]);
 
   // -- Submit ----------------------------------------------------------------
 
@@ -248,12 +294,13 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
           if (config) {
             await dispatch(updateCustomFeed({
               id: config.id,
+              feed_type: feedType,
               enabled,
               pull_cadence_minutes: parseInt(cadence, 10),
               steps: buildSteps(),
             }));
           } else {
-            await dispatch(createCustomFeed({ listId, steps: buildSteps() }));
+            await dispatch(createCustomFeed({ listId, feedType, steps: buildSteps() }));
             void dispatch(fetchLists());
           }
           onClose();
@@ -264,7 +311,7 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
 
       void doSubmit();
     },
-    [dispatch, config, listId, enabled, cadence, buildSteps, onClose],
+    [dispatch, config, listId, feedType, enabled, cadence, buildSteps, onClose],
   );
 
   // -- Available lists -------------------------------------------------------
@@ -288,9 +335,15 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
   );
 
   const showCadence = hasPullSources(sourceDrafts);
+  const isAlgorithmic = feedType === 'algorithmic';
 
   const handleListIdChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => { setListId(e.target.value); },
+    [],
+  );
+
+  const handleFeedTypeChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => { setFeedType(e.target.value as CustomFeedType); },
     [],
   );
 
@@ -330,6 +383,31 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
         </div>
       )}
 
+      <div className='fields-group'>
+        <SelectField
+          id='cf-feed-type'
+          label={intl.formatMessage(messages.feedTypeLabel)}
+          value={feedType}
+          onChange={handleFeedTypeChange}
+        >
+          <option value='standard'>{intl.formatMessage(messages.feedTypeStandard)}</option>
+          <option value='algorithmic'>{intl.formatMessage(messages.feedTypeAlgorithmic)}</option>
+        </SelectField>
+      </div>
+
+      {isAlgorithmic && (
+        <PhaseSection
+          phaseLabel={messages.algorithmPhase}
+          addLabel={messages.addAlgorithm}
+          drafts={algorithmDrafts}
+          availableOptions={PHASE_OPTIONS.algorithm}
+          maxSteps={1}
+          onAdd={addAlgorithm}
+          onRemove={removeAlgorithm}
+          onOptionsChange={changeAlgorithmOptions}
+        />
+      )}
+
       <PhaseSection
         phaseLabel={messages.sourcePhase}
         addLabel={messages.addSource}
@@ -341,14 +419,26 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
       />
 
       <PhaseSection
-        phaseLabel={messages.filterPhase}
-        addLabel={messages.addFilter}
+        phaseLabel={isAlgorithmic ? messages.preFilterPhase : messages.filterPhase}
+        addLabel={isAlgorithmic ? messages.addPreFilter : messages.addFilter}
         drafts={filterDrafts}
         availableOptions={PHASE_OPTIONS.filter}
         onAdd={addFilter}
         onRemove={removeFilter}
         onOptionsChange={changeFilterOptions}
       />
+
+      {isAlgorithmic && (
+        <PhaseSection
+          phaseLabel={messages.algorithmicFilterPhase}
+          addLabel={messages.addAlgorithmicFilter}
+          drafts={algorithmicFilterDrafts}
+          availableOptions={PHASE_OPTIONS.algorithmic_filter}
+          onAdd={addAlgorithmicFilter}
+          onRemove={removeAlgorithmicFilter}
+          onOptionsChange={changeAlgorithmicFilterOptions}
+        />
+      )}
 
       <PhaseSection
         phaseLabel={messages.removalPhase}

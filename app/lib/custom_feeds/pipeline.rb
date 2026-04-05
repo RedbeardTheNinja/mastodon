@@ -6,6 +6,7 @@ module CustomFeeds
   class Pipeline
     # @param [CustomFeedConfig] config
     def initialize(config)
+      @algorithmic     = config.feed_type == 'algorithmic'
       @source_entries  = build_entries(config, 'source',           Sources::Base::REGISTRY)
       @filter_entries  = build_entries(config, 'filter',           Filters::Base::REGISTRY)
       @removal_entries = build_entries(config, 'removal_strategy', RemovalStrategies::Base::REGISTRY)
@@ -53,6 +54,11 @@ module CustomFeeds
     # @return [Boolean]
     def remove_on?(interaction_type)
       @removal_entries.any? { |e| e[:instance].remove_on?(interaction_type, e[:options]) }
+    end
+
+    # Returns true if this is an algorithmic feed (candidates go to pending queue).
+    def algorithmic?
+      @algorithmic
     end
 
     # The resolved overflow strategy (always non-nil; defaults to OldestFirst).

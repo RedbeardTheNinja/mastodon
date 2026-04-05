@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class REST::CustomFeedConfigSerializer < ActiveModel::Serializer
-  attributes :id, :list_id, :enabled, :pull_cadence_minutes, :steps
+  attributes :id, :list_id, :feed_type, :enabled, :pull_cadence_minutes, :steps
 
   def id
     object.id.to_s

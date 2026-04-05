@@ -1,8 +1,12 @@
 // See app/serializers/rest/custom_feed_config_serializer.rb
 
+export type CustomFeedType = 'standard' | 'algorithmic';
+
 export type CustomFeedPhase =
   | 'source'
   | 'filter'
+  | 'algorithm'
+  | 'algorithmic_filter'
   | 'removal_strategy'
   | 'overflow_strategy';
 
@@ -20,6 +24,7 @@ export type ApiCustomFeedStepInputJSON = Omit<ApiCustomFeedStepJSON, 'id'>;
 export interface ApiCustomFeedConfigJSON {
   id: string;
   list_id: string;
+  feed_type: CustomFeedType;
   enabled: boolean;
   pull_cadence_minutes: number;
   steps: ApiCustomFeedStepJSON[];
@@ -28,6 +33,7 @@ export interface ApiCustomFeedConfigJSON {
 // Input type for create/update payloads
 export interface ApiCustomFeedConfigInputJSON {
   list_id?: string;
+  feed_type?: CustomFeedType;
   enabled?: boolean;
   pull_cadence_minutes?: number;
   steps?: ApiCustomFeedStepInputJSON[];

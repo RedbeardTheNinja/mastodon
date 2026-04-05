@@ -7,6 +7,8 @@ import DeleteIcon from '@/material-icons/400-24px/delete.svg?react';
 
 import { Icon } from 'mastodon/components/icon';
 
+import { AlgorithmicFilterOptions } from './step_options/algorithmic_filter_options';
+import { AlgorithmOptions } from './step_options/algorithm_options';
 import { BlockedTagsOptions } from './step_options/blocked_tags_options';
 import { FriendsLikedOptions } from './step_options/friends_liked_options';
 import { RemotePublicTimelineOptions } from './step_options/remote_public_timeline_options';
@@ -35,6 +37,8 @@ interface Props {
   addLabel: MessageDescriptor;
   drafts: StepDraft[];
   availableOptions: StepOption[];
+  /** If set, hide the add dropdown once this many steps are present. */
+  maxSteps?: number;
   onAdd: (stepType: string) => void;
   onRemove: (stepType: string) => void;
   onOptionsChange: (stepType: string, options: Record<string, unknown>) => void;
@@ -63,6 +67,12 @@ const StepOptionsForm = ({
   }
   if (stepType === 'time_based') {
     return <TimeBasedOptions options={options} onChange={onChange} />;
+  }
+  if (stepType === 'affinity_score') {
+    return <AlgorithmOptions options={options} onChange={onChange} />;
+  }
+  if (stepType === 'min_score' || stepType === 'top_k_per_batch' || stepType === 'min_signals') {
+    return <AlgorithmicFilterOptions stepType={stepType} options={options} onChange={onChange} />;
   }
   return null;
 };
@@ -116,6 +126,7 @@ export const PhaseSection: React.FC<Props> = ({
   addLabel,
   drafts,
   availableOptions,
+  maxSteps,
   onAdd,
   onRemove,
   onOptionsChange,
@@ -123,7 +134,8 @@ export const PhaseSection: React.FC<Props> = ({
   const intl = useIntl();
 
   const addedTypes = new Set(drafts.map((d) => d.step_type));
-  const remaining = availableOptions.filter((o) => !addedTypes.has(o.value));
+  const atMax = maxSteps !== undefined && drafts.length >= maxSteps;
+  const remaining = atMax ? [] : availableOptions.filter((o) => !addedTypes.has(o.value));
 
   const handleAddChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
