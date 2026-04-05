@@ -123,54 +123,16 @@ redis-cli ZRANGE dead 0 -1                    # failed Sidekiq jobs
 - i18n strings are in `config/locales/` (Ruby) and `app/javascript/mastodon/locales/` (JS)
 - **Ruby constant resolution in namespaced code:** Inside a module like `module NewToMe`, a bare `FeedManager` resolves to `NewToMe::FeedManager`, not the top-level class. Use `::FeedManager` to reference top-level constants from within sub-modules.
 
-## Dev Container
+## Environments
 
-The development environment runs in Docker via VS Code Dev Containers. The main app container is named `devcontainer-app-1`. Run commands inside it with `docker exec`:
+This repo is used in two environments. Determine which one you are in, then read the appropriate file for environment-specific commands.
 
-```bash
-# Run any Rails/Ruby command
-docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails ..."
+**How to detect:**
 
-# Run rubocop on specific files
-docker exec devcontainer-app-1 bin/rubocop path/to/file.rb
+- **Dev container** (Windows/Docker): working directory is `/workspaces/mastodon`, or `test -d /workspaces` is true
+- **Production server** (Linux): working directory is `/home/mastodon/live`
 
-# Run a one-off Rails runner script
-docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails runner 'puts Model.count'"
+**Environment guides** (read the relevant one):
 
-# Run migrations
-docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails db:migrate"
-
-# Run a rake task
-docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails custom_feeds:seed_nsfw"
-
-# Find and restart Sidekiq (needed after adding/changing sidekiq.yml schedules)
-docker exec devcontainer-app-1 ps aux | grep sidekiq          # find PID
-docker exec -d devcontainer-app-1 bash -c "cd /workspaces/mastodon && bundle exec sidekiq -C config/sidekiq.yml >> log/sidekiq.log 2>&1"
-
-# Query Redis directly
-docker exec devcontainer-redis-1 redis-cli ZCARD feed:home:{account_id}
-
-# Query Postgres directly
-docker exec devcontainer-db-1 psql -U mastodon -d mastodon_development -c "SELECT ..."
-```
-
-Other containers: `devcontainer-db-1` (Postgres), `devcontainer-redis-1` (Redis), `devcontainer-es-1` (Elasticsearch).
-
-Note: `bin/rails runner` works in development mode inside the container (unlike the production server). Do NOT use `RAILS_ENV=production` in the dev container.
-
-## Production Server
-
-This instance runs in production mode (`RAILS_ENV=production`, database `mastodon_production`, domain `redbeardthe.ninja`). Ruby is managed via rbenv at `/home/mastodon/.rbenv`. App runs as the `mastodon` user.
-
-```bash
-# Run a Rails command
-sudo -u mastodon bash -c 'export PATH="/home/mastodon/.rbenv/shims:/home/mastodon/.rbenv/bin:$PATH" && eval "$(rbenv init -)" && RAILS_ENV=production bin/rails ...'
-
-# Query the database directly (faster for diagnostics)
-sudo -u mastodon psql -d mastodon_production -c "SELECT ..."
-
-# Restart Sidekiq gracefully (picks up code changes)
-sudo -u mastodon kill -USR2 $(pgrep -f sidekiq)
-```
-
-Note: `rails runner` in `development` mode fails at boot due to a `LetterOpenerWeb` CSP initializer issue. Use `RAILS_ENV=production` or query the database/Redis directly.
+- Dev container: [`.claude/env-dev-container.md`](.claude/env-dev-container.md)
+- Production server: [`.claude/env-production.md`](.claude/env-production.md)
