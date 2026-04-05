@@ -16,6 +16,7 @@ import { dropdownMenuReducer } from './dropdown_menu';
 import filters from './filters';
 import height_cache from './height_cache';
 import history from './history';
+import { customFeedsReducer } from './custom_feeds';
 import { listsReducer } from './lists';
 import { markersReducer } from './markers';
 import media_attachments from './media_attachments';
@@ -69,6 +70,7 @@ const reducers = {
   height_cache,
   custom_emojis,
   lists: listsReducer,
+  customFeeds: customFeedsReducer,
   followedTags: followedTagsReducer,
   filters,
   conversations,

@@ -64,6 +64,7 @@ import {
   Lists,
   ListEdit,
   ListMembers,
+  CustomFeedsSettings,
   Collections,
   CollectionDetail,
   CollectionsEditor,
@@ -251,6 +252,7 @@ class SwitchingColumnsArea extends PureComponent {
             <WrappedRoute path='/followed_tags' component={FollowedTags} content={children} />
             <WrappedRoute path='/mutes' component={Mutes} content={children} />
             <WrappedRoute path='/lists' component={Lists} content={children} />
+            <WrappedRoute path='/custom_feeds' component={CustomFeedsSettings} content={children} />
             {areCollectionsEnabled() &&
               [
                 <WrappedRoute path={['/collections/new', '/collections/:id/edit']} component={CollectionsEditor} content={children} />,

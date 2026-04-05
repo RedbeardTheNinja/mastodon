@@ -638,6 +638,7 @@ code {
 
   select {
     appearance: none;
+    color-scheme: inherit;
     box-sizing: border-box;
     font-size: 14px;
     color: var(--color-text-primary);

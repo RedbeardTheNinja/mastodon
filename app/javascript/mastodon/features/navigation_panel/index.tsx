@@ -26,6 +26,8 @@ import SettingsIcon from '@/material-icons/400-24px/settings.svg?react';
 import StarActiveIcon from '@/material-icons/400-24px/star-fill.svg?react';
 import StarIcon from '@/material-icons/400-24px/star.svg?react';
 import TrendingUpIcon from '@/material-icons/400-24px/trending_up.svg?react';
+import TuneActiveIcon from '@/material-icons/400-24px/tune-fill.svg?react';
+import TuneIcon from '@/material-icons/400-24px/tune.svg?react';
 import { fetchFollowRequests } from 'mastodon/actions/accounts';
 import { openNavigation, closeNavigation } from 'mastodon/actions/navigation';
 import { Account } from 'mastodon/components/account';
@@ -70,6 +72,10 @@ const messages = defineMessages({
   direct: { id: 'navigation_bar.direct', defaultMessage: 'Private mentions' },
   favourites: { id: 'navigation_bar.favourites', defaultMessage: 'Favorites' },
   bookmarks: { id: 'navigation_bar.bookmarks', defaultMessage: 'Bookmarks' },
+  customFeeds: {
+    id: 'navigation_bar.custom_feeds',
+    defaultMessage: 'Custom Feeds',
+  },
   preferences: {
     id: 'navigation_bar.preferences',
     defaultMessage: 'Preferences',
@@ -303,6 +309,15 @@ export const NavigationPanel: React.FC<{ multiColumn?: boolean }> = ({
             <ListPanel />
 
             <FollowedTagsPanel />
+
+            <ColumnLink
+              transparent
+              to='/custom_feeds'
+              icon='tune'
+              iconComponent={TuneIcon}
+              activeIconComponent={TuneActiveIcon}
+              text={intl.formatMessage(messages.customFeeds)}
+            />
 
             <ColumnLink
               transparent
