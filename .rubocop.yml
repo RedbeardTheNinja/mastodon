@@ -6,6 +6,8 @@ AllCops:
     - Vagrantfile
     - config/initializers/json_ld*
     - lib/mastodon/migration_helpers.rb
+    - db/schema.rb
+    - db/migrate/**/*
   ExtraDetails: true
   NewCops: enable
   TargetRubyVersion: 3.2 # Oldest supported ruby version

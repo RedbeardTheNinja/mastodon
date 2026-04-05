@@ -253,6 +253,8 @@ namespace :api, format: false do
       resource :accounts, only: [:show, :create, :destroy], module: :lists
     end
 
+    resources :custom_feeds, only: [:index, :create, :show, :update, :destroy]
+
     namespace :featured_tags do
       get :suggestions, to: 'suggestions#index'
     end

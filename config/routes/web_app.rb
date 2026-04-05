@@ -8,6 +8,7 @@
   /blocks
   /bookmarks
   /collections/(*any)
+  /custom_feeds
   /conversations
   /deck/(*any)
   /directory
