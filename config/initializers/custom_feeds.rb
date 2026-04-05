@@ -5,6 +5,7 @@ Rails.application.config.to_prepare do
   CustomFeeds::Sources::FollowedPosts.register!
   CustomFeeds::Sources::RemoteTagTimeline.register!
   CustomFeeds::Sources::RemotePublicTimeline.register!
+  CustomFeeds::Filters::HomeFilters.register!
   CustomFeeds::Filters::InteractedPosts.register!
   CustomFeeds::Filters::FriendsLiked.register!
   CustomFeeds::Filters::BlockedTags.register!

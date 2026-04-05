@@ -152,6 +152,10 @@ const stepLabels = defineMessages({
     defaultMessage: 'Remote server — public timeline',
   },
   none: { id: 'custom_feeds.option.none', defaultMessage: 'None' },
+  homeFilters: {
+    id: 'custom_feeds.filters.home_filters',
+    defaultMessage: 'Hide blocked and muted accounts',
+  },
   interactedPosts: {
     id: 'custom_feeds.filters.interacted_posts',
     defaultMessage: 'Hide already-interacted posts',
@@ -237,6 +241,7 @@ const PHASE_OPTIONS: Record<CustomFeedPhase, StepOption[]> = {
     { value: 'remote_public_timeline', label: stepLabels.remotePublicTimeline },
   ],
   filter: [
+    { value: 'home_filters', label: stepLabels.homeFilters },
     { value: 'interacted_posts', label: stepLabels.interactedPosts },
     { value: 'friends_liked', label: stepLabels.friendsLiked },
     { value: 'blocked_tags', label: stepLabels.blockedTags },
@@ -333,7 +338,9 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
     stepsFor(config, 'source'),
   );
   const [filterDrafts, setFilterDrafts] = useState<StepDraft[]>(() =>
-    stepsFor(config, 'filter'),
+    config
+      ? stepsFor(config, 'filter')
+      : [{ step_type: 'home_filters', options: {} }],
   );
   const [algorithmDrafts, setAlgorithmDrafts] = useState<StepDraft[]>(() =>
     stepsFor(config, 'algorithm'),
