@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/c/Users/antyp/IdeaProjects/**)",
+
+      "Bash(docker exec:*)",
+      "Bash(docker ps:*)",
+
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git status:*)",
+      "Bash(git -C \"C:\\\\Users\\\\antyp\\\\IdeaProjects\\\\mastodon\":*)",
+
+      "Bash(ls:*)",
+      "Bash(sleep:*)",
+
+      "Bash(bin/rubocop:*)",
+      "Bash(yarn lint:*)",
+      "Bash(yarn typecheck:*)",
+
+      "Bash(xargs wc:*)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}
