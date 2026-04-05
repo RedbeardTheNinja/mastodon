@@ -54,7 +54,14 @@ module CustomFeeds
       deduped = all_candidates.select { |s| seen.add?(s.id) }
 
       deduped.each do |status|
-        next if ::FeedManager.instance.filter(:home, status, account)
+        # Respect user-level blocks, mutes, and domain blocks.
+        # We don't use FeedManager.filter(:home, ...) here because filter_from_home
+        # applies home-feed-specific rules (language filters, exclusive-list skips)
+        # that are not appropriate for a custom feed context.
+        next if account.blocking?(status.account) ||
+                status.account.blocking?(account) ||
+                account.muting?(status.account) ||
+                account.domain_blocking?(status.account.domain)
         next unless pipeline.passes_filters?(status, account)
 
         CustomFeeds::FeedManager.instance.push_and_stream(config, status)

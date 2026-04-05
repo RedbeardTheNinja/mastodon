@@ -37,10 +37,10 @@ module CustomFeeds
         response = HTTP.timeout(10).get(url, params: params)
         return FetchResult.new(nil, []) unless response.status.success?
 
-        raw       = JSON.parse(response.body)
-        max_id    = raw.filter_map { |s| s['id'] }.max
-        uris      = raw.filter_map { |s| s['uri'] }
-        statuses  = resolve_uris(uris)
+        raw      = JSON.parse(response.body)
+        max_id   = raw.filter_map { |s| s['id'] }.max
+        uris     = raw.filter_map { |s| s['uri'] }
+        statuses = resolve_uris(uris)
         FetchResult.new(max_id, statuses)
       rescue => e
         Rails.logger.warn("CustomFeeds::Sources::RemoteTagTimeline fetch failed (#{bucket}): #{e.message}")
@@ -54,18 +54,6 @@ module CustomFeeds
           next if domain.blank? || tag.blank?
 
           "#{domain}:#{tag}"
-        end
-      end
-
-      private
-
-      def resolve_uris(uris)
-        Chewy.strategy(:bypass) do
-          uris.filter_map do |uri|
-            ResolveURLService.new.call(uri)
-          rescue
-            nil
-          end
         end
       end
     end

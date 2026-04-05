@@ -38,13 +38,8 @@ module CustomFeeds
 
         raw      = JSON.parse(response.body)
         max_id   = raw.filter_map { |s| s['id'] }.max
-        statuses = Chewy.strategy(:bypass) do
-          raw.filter_map do |s|
-            ResolveURLService.new.call(s['uri'])
-          rescue
-            nil
-          end
-        end
+        uris     = raw.filter_map { |s| s['uri'] }
+        statuses = resolve_uris(uris)
         FetchResult.new(max_id, statuses)
       rescue => e
         Rails.logger.warn("CustomFeeds::Sources::RemotePublicTimeline fetch failed (#{bucket}): #{e.message}")

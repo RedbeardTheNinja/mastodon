@@ -53,6 +53,25 @@ module CustomFeeds
       def self.buckets_for(_options)
         ['']
       end
+
+      private
+
+      # Resolve a list of remote URIs to local Status records.
+      # Checks the local database first to avoid unnecessary HTTP round-trips and
+      # to prevent distribution side-effects (home feed insertion via DistributionWorker)
+      # for statuses we have already fetched. Truly new statuses are resolved via
+      # ActivityPub and will be distributed normally to local followers.
+      # @param [Array<String>] uris
+      # @return [Array<Status>]
+      def resolve_uris(uris)
+        Chewy.strategy(:bypass) do
+          uris.filter_map do |uri|
+            Status.find_by(uri: uri) || ResolveURLService.new.call(uri)
+          rescue
+            nil
+          end
+        end
+      end
     end
   end
 end
