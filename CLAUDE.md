@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 Mastodon is an ActivityPub-based federated social network server. The stack is:
+
 - **Backend**: Ruby on Rails (REST API, web pages, background jobs)
 - **Frontend**: React + Redux + TypeScript, bundled with Vite
 - **Streaming**: Separate Node.js server for WebSocket real-time updates
@@ -18,6 +19,7 @@ bin/dev            # Start all services (Rails, Sidekiq, streaming, Vite)
 ```
 
 `bin/dev` runs 4 processes via `Procfile.dev`:
+
 - **web** (port 3000): Rails/Puma
 - **sidekiq**: Background jobs
 - **stream** (port 4000): Node.js streaming server
@@ -91,11 +93,13 @@ Federation logic lives in `app/lib/activitypub/` and `lib/`. Incoming activities
 Feeds are Redis sorted sets (score = status ID, member = status ID). `Feed` base class in `app/models/feed.rb` reads from Redis; subclasses override `key`. `FeedManager` (`app/lib/feed_manager.rb`) handles push/remove/filter for home and list feeds and sends streaming updates via `redis.publish("timeline:...")`.
 
 Redis key patterns:
+
 - Home: `feed:home:{account_id}`
 - List: `feed:list:{list_id}`
 - New To Me: `feed:new_to_me:{account_id}`
 
 Useful debugging commands:
+
 ```bash
 redis-cli ZCARD feed:home:{account_id}        # feed size
 redis-cli ZRANGE feed:home:{account_id} -5 -1 # 5 most recent IDs
@@ -118,6 +122,41 @@ redis-cli ZRANGE dead 0 -1                    # failed Sidekiq jobs
 - API follows the Mastodon REST API spec; breaking changes require API versioning
 - i18n strings are in `config/locales/` (Ruby) and `app/javascript/mastodon/locales/` (JS)
 - **Ruby constant resolution in namespaced code:** Inside a module like `module NewToMe`, a bare `FeedManager` resolves to `NewToMe::FeedManager`, not the top-level class. Use `::FeedManager` to reference top-level constants from within sub-modules.
+
+## Dev Container
+
+The development environment runs in Docker via VS Code Dev Containers. The main app container is named `devcontainer-app-1`. Run commands inside it with `docker exec`:
+
+```bash
+# Run any Rails/Ruby command
+docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails ..."
+
+# Run rubocop on specific files
+docker exec devcontainer-app-1 bin/rubocop path/to/file.rb
+
+# Run a one-off Rails runner script
+docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails runner 'puts Model.count'"
+
+# Run migrations
+docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails db:migrate"
+
+# Run a rake task
+docker exec devcontainer-app-1 bash -c "cd /workspaces/mastodon && bin/rails custom_feeds:seed_nsfw"
+
+# Find and restart Sidekiq (needed after adding/changing sidekiq.yml schedules)
+docker exec devcontainer-app-1 ps aux | grep sidekiq          # find PID
+docker exec -d devcontainer-app-1 bash -c "cd /workspaces/mastodon && bundle exec sidekiq -C config/sidekiq.yml >> log/sidekiq.log 2>&1"
+
+# Query Redis directly
+docker exec devcontainer-redis-1 redis-cli ZCARD feed:home:{account_id}
+
+# Query Postgres directly
+docker exec devcontainer-db-1 psql -U mastodon -d mastodon_development -c "SELECT ..."
+```
+
+Other containers: `devcontainer-db-1` (Postgres), `devcontainer-redis-1` (Redis), `devcontainer-es-1` (Elasticsearch).
+
+Note: `bin/rails runner` works in development mode inside the container (unlike the production server). Do NOT use `RAILS_ENV=production` in the dev container.
 
 ## Production Server
 
