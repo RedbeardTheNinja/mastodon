@@ -15,7 +15,7 @@
 #
 
 class CustomFeedStep < ApplicationRecord
-  VALID_PHASES = %w(source filter removal_strategy overflow_strategy).freeze
+  VALID_PHASES = %w(source filter algorithm algorithmic_filter removal_strategy overflow_strategy).freeze
 
   belongs_to :custom_feed_config
   has_many :custom_feed_pull_cursors, dependent: :destroy

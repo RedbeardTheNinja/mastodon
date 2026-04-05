@@ -28,7 +28,13 @@ module Recommendations
         end
 
         account_score = @account_affinities[original.account_id.to_s].to_f
-        domain_score  = @domain_affinities[original.account.domain.to_s].to_f * 0.5
+        # Skip domain affinity for local accounts (domain is nil/blank — all local
+        # accounts share the same server so domain is not a meaningful signal).
+        domain_score = if original.account.domain.present?
+                         @domain_affinities[original.account.domain].to_f * 0.5
+                       else
+                         0.0
+                       end
 
         (tag_score + account_score + domain_score) * time_factor
       end

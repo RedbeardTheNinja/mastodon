@@ -28,7 +28,9 @@ module Recommendations
       end
 
       upsert_signal(account, 'account', original.account_id.to_s, weight)
-      upsert_signal(account, 'domain', original.account.domain.to_s, weight * DOMAIN_MULTIPLIER)
+      # Only record domain signals for remote accounts — local accounts all share
+      # the same server, so the domain is not a meaningful cross-account signal.
+      upsert_signal(account, 'domain', original.account.domain, weight * DOMAIN_MULTIPLIER) if original.account.domain.present?
     rescue ActiveRecord::RecordNotFound
       true
     end
