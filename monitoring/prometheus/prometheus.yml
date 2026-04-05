@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: production
+    instance: antypdet-server
+
+# ── Scrape targets ──────────────────────────────────────────────────────────
+
+scrape_configs:
+  # Rails + Sidekiq application metrics via prometheus_exporter
+  - job_name: mastodon_app
+    static_configs:
+      - targets: ['antypdet-server:9394']
+        labels:
+          service: mastodon
+
+  # System metrics (CPU, memory, disk, load) via node_exporter
+  - job_name: node
+    static_configs:
+      - targets: ['antypdet-server:9100']
+        labels:
+          service: node
+
+  # Redis metrics via redis_exporter
+  - job_name: redis
+    static_configs:
+      - targets: ['antypdet-server:9121']
+        labels:
+          service: redis
+
+  # Mastodon streaming server metrics (built-in prom-client endpoint)
+  - job_name: mastodon_streaming
+    static_configs:
+      - targets: ['antypdet-server:4000']
+        labels:
+          service: streaming
+    metrics_path: /metrics
+
+  # Pushgateway (for any ad-hoc / one-shot pushes)
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ['pushgateway:9091']

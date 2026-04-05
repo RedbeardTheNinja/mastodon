@@ -1,0 +1,309 @@
+{
+  "title": "Custom Feeds — Performance Impact",
+  "uid": "custom-feeds-perf",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "tags": ["mastodon", "custom-feeds"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Feed Activity",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 2,
+      "title": "Feed inserts / sec  (standard vs algorithmic)",
+      "description": "Rate of statuses inserted into or enqueued for custom feeds. Compare standard (immediate push) vs algorithmic (pending queue enqueue) to see relative volume.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (feed_type) (rate(custom_feed_inserts_total[5m]))",
+          "legendFormat": "{{feed_type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(sidekiq_jobs_processed_total{job_class=\"FeedInsertWorker\"}[5m])",
+          "legendFormat": "home (baseline)",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "title": "Algorithmic candidate outcomes",
+      "description": "What happens to each candidate dequeued by AlgorithmicFeedWorker. 'promoted' = reached the user's feed; 'filtered_*' = dropped at various gates.",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "stacking": { "mode": "normal" }
+          }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(custom_feed_algo_candidates_total[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Worker Execution Cost  (CPU proxy)",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 4,
+      "title": "Sidekiq job duration p95  (custom feed workers vs home)",
+      "description": "p95 execution time per job class.  The delta between CustomFeeds::FeedInsertWorker and FeedInsertWorker is the marginal cost per status pushed to a custom feed.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (job_class, le) (rate(sidekiq_job_duration_seconds_bucket{job_class=~\"(CustomFeeds::|Recommendations::).*\"}[5m])))",
+          "legendFormat": "{{job_class}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (job_class, le) (rate(sidekiq_job_duration_seconds_bucket{job_class=\"FeedInsertWorker\"}[5m])))",
+          "legendFormat": "FeedInsertWorker (home baseline)",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "title": "Sidekiq queue latency  (custom feed queues)",
+      "description": "How long jobs sit in queue before being picked up.  High latency on 'push' or 'pull' indicates the workers are falling behind.",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sidekiq_queue_latency{name=~\"push|pull|default|scheduler\"}",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Redis Memory  (feed storage cost)",
+      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 6,
+      "title": "Feed Redis memory by type",
+      "description": "Estimated bytes occupied by feed keys per type.  Home feeds are the baseline; custom feeds are the marginal cost.  Sampled every 5 minutes by StatsCollectorWorker.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "custom_feed_redis_memory_bytes",
+          "legendFormat": "{{feed_type}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 7,
+      "title": "Active feed key count by type",
+      "description": "Number of Redis keys per feed type.  Multiply home count × memory-per-key to estimate per-user cost; compare to custom count to get the overhead ratio.",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "custom_feed_redis_feed_count",
+          "legendFormat": "{{feed_type}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 12,
+      "type": "row",
+      "title": "PostgreSQL Storage  (disk cost)",
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 8,
+      "title": "Custom feed table sizes  (table + indexes)",
+      "description": "pg_total_relation_size for each custom feed table.  recommendation_signals grows with user interactions; custom_feed_steps scales with number of configured feeds.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 28, "w": 16, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "custom_feed_pg_table_bytes",
+          "legendFormat": "{{table_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 9,
+      "title": "Signals recorded / hour",
+      "description": "Rate of recommendation signal records written by SignalWorker.  Higher rate = more algorithmic feed data being built up.",
+      "type": "timeseries",
+      "gridPos": { "x": 16, "y": 28, "w": 8, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (signal_type) (rate(recommendation_signal_records_total[5m])) * 3600",
+          "legendFormat": "{{signal_type}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 13,
+      "type": "row",
+      "title": "System Resources  (server-wide view)",
+      "gridPos": { "x": 0, "y": 36, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 14,
+      "title": "Server CPU usage %",
+      "description": "Overall server CPU.  Correlate spikes with custom feed worker job rates above to attribute CPU cost.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 37, "w": 8, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 2 }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "legendFormat": "CPU %",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 15,
+      "title": "Redis total memory used",
+      "description": "redis_memory_used_bytes from redis_exporter.  Watch for growth as feeds accumulate posts.",
+      "type": "timeseries",
+      "gridPos": { "x": 8, "y": 37, "w": 8, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "Redis RSS",
+          "refId": "A"
+        },
+        {
+          "expr": "redis_memory_used_bytes - sum(custom_feed_redis_memory_bytes)",
+          "legendFormat": "Redis (non-feed)",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 16,
+      "title": "Rails process RSS",
+      "description": "ruby_process_rss_bytes from prometheus_exporter Process instrumentation.  Should be stable; growth indicates a memory leak.",
+      "type": "timeseries",
+      "gridPos": { "x": 16, "y": 37, "w": 8, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "ruby_process_rss_bytes",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

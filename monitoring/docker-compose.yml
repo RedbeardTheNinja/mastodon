@@ -1,0 +1,44 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: monitoring_prometheus
+    restart: unless-stopped
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=60d'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: monitoring_grafana
+    restart: unless-stopped
+    ports:
+      - '3001:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+
+  # Pushgateway is available for push-based metrics if needed in future.
+  # The primary collection path is Prometheus scraping antypdet-server directly.
+  pushgateway:
+    image: prom/pushgateway:v1.9.0
+    container_name: monitoring_pushgateway
+    restart: unless-stopped
+    ports:
+      - '9091:9091'
+
+volumes:
+  prometheus_data:
+  grafana_data:

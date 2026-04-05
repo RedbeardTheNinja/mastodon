@@ -32,18 +32,26 @@ module Recommendations
       if min_signals_step
         required = min_signals_step.options.fetch('count', 5).to_i
         actual   = RecommendationSignal.where(account: account).count
-        return if actual < required
+        if actual < required
+          candidates.size.times { CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_min_signals') }
+          return
+        end
       end
 
       scored = algo.score_batch(candidates)
+      before_filter = scored.size
       scored = apply_algorithmic_filters(scored, config)
+      (before_filter - scored.size).times { CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_score') }
 
       # Run standard pipeline filters as a final gate before promotion
       pipeline = CustomFeeds::Pipeline.new(config)
       scored.each do |result|
-        next unless pipeline.passes_filters?(result[:status], account)
-
-        CustomFeeds::FeedManager.instance.push_and_stream(config, result[:status])
+        if pipeline.passes_filters?(result[:status], account)
+          CustomFeeds::FeedManager.instance.push_and_stream(config, result[:status])
+          CustomFeeds::Metrics.record_algo_candidate(result: 'promoted')
+        else
+          CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_pipeline')
+        end
       end
     end
 

@@ -25,12 +25,18 @@ module Recommendations
 
       original.tags.each do |tag|
         upsert_signal(account, 'tag', tag.name.downcase, weight)
+        CustomFeeds::Metrics.record_signal(signal_type: 'tag', interaction_type: interaction_type)
       end
 
       upsert_signal(account, 'account', original.account_id.to_s, weight)
+      CustomFeeds::Metrics.record_signal(signal_type: 'account', interaction_type: interaction_type)
+
       # Only record domain signals for remote accounts — local accounts all share
       # the same server, so the domain is not a meaningful cross-account signal.
-      upsert_signal(account, 'domain', original.account.domain, weight * DOMAIN_MULTIPLIER) if original.account.domain.present?
+      if original.account.domain.present?
+        upsert_signal(account, 'domain', original.account.domain, weight * DOMAIN_MULTIPLIER)
+        CustomFeeds::Metrics.record_signal(signal_type: 'domain', interaction_type: interaction_type)
+      end
     rescue ActiveRecord::RecordNotFound
       true
     end

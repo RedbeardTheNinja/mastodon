@@ -67,8 +67,10 @@ module CustomFeeds
         if pipeline.algorithmic?
           # Stage in the pending queue; the algorithm worker promotes to the feed.
           CustomFeeds::FeedManager.instance.enqueue_candidate(config, status)
+          CustomFeeds::Metrics.record_insert(feed_type: 'algorithmic', result: 'enqueued')
         else
           CustomFeeds::FeedManager.instance.push_and_stream(config, status)
+          CustomFeeds::Metrics.record_insert(feed_type: 'standard', result: 'pushed')
         end
       end
     rescue ActiveRecord::RecordNotFound

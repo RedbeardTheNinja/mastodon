@@ -6,11 +6,16 @@ if ENV['MASTODON_PROMETHEUS_EXPORTER_ENABLED'] == 'true'
 
   if ENV['MASTODON_PROMETHEUS_EXPORTER_LOCAL'] == 'true'
     require 'mastodon/prometheus_exporter/local_server'
+    require 'mastodon/prometheus_exporter/custom_feeds_collector'
 
     # bind is the address, on which the webserver will listen
     # port is the port that will provide the /metrics route
     Mastodon::PrometheusExporter::LocalServer.bind = ENV.fetch('MASTODON_PROMETHEUS_EXPORTER_HOST', 'localhost')
     Mastodon::PrometheusExporter::LocalServer.port = ENV.fetch('MASTODON_PROMETHEUS_EXPORTER_PORT', '9394').to_i
+
+    Mastodon::PrometheusExporter::LocalServer.register_collector(
+      Mastodon::PrometheusExporter::CustomFeedsCollector.new
+    )
   end
 
   if ENV['MASTODON_PROMETHEUS_EXPORTER_WEB_DETAILED_METRICS'] == 'true'

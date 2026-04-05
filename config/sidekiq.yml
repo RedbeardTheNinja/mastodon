@@ -84,3 +84,7 @@
       every: '5m'
       class: Recommendations::ScheduleAlgorithmicFeedsWorker
       queue: scheduler
+    custom_feeds_stats_collector:
+      every: '5m'
+      class: CustomFeeds::StatsCollectorWorker
+      queue: scheduler
