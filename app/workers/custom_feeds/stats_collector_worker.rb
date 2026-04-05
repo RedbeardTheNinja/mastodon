@@ -39,7 +39,7 @@ module CustomFeeds
         keys = scan_keys(spec[:pattern])
         keys.reject! { |k| k.end_with?(spec[:exclude]) } if spec[:exclude]
 
-        memory_bytes = keys.sum { |k| redis.memory_usage(k) || 0 }
+        memory_bytes = keys.sum { |k| redis.call('MEMORY', 'USAGE', k) || 0 }
         CustomFeeds::Metrics.record_redis_gauge(
           feed_type: feed_type,
           memory_bytes: memory_bytes,
@@ -52,7 +52,7 @@ module CustomFeeds
       conn = ActiveRecord::Base.connection
       PG_TABLES.each do |table|
         result = conn.execute(
-          conn.sanitize_sql_array(
+          ActiveRecord::Base.sanitize_sql_array(
             ['SELECT pg_total_relation_size(?) AS bytes', table]
           )
         ).first
