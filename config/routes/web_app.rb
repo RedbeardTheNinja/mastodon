@@ -9,6 +9,7 @@
   /bookmarks
   /collections/(*any)
   /custom_feeds
+  /custom_feeds/signals
   /conversations
   /deck/(*any)
   /directory

@@ -11648,6 +11648,114 @@ noscript {
   border-bottom: 1px solid var(--color-border-primary);
 }
 
+.custom-feed-form__toggle-list-mode {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+
+  &:hover {
+    color: var(--color-accent-hover, var(--color-accent));
+  }
+}
+
+.signals {
+  padding: 0 0 16px;
+
+  &__section {
+    padding: 12px 16px 0;
+
+    &__heading {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text-secondary, #9baec8);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 6px;
+    }
+  }
+
+  &__table {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+
+  &__row {
+    display: grid;
+    grid-template-columns: 1fr 80px 90px 80px;
+    align-items: center;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--color-border-primary);
+    font-size: 13px;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    &--header {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-text-secondary, #9baec8);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: var(--color-bg-secondary, rgba(0, 0, 0, 15%));
+    }
+
+    &__entity {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &__weight {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    &__weight-edit {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      grid-column: 2 / 4;
+
+      input {
+        width: 60px;
+        padding: 2px 4px;
+        font-size: 12px;
+      }
+
+      .button--small {
+        padding: 2px 8px;
+        font-size: 12px;
+        min-height: unset;
+        height: auto;
+        line-height: 1.5;
+      }
+    }
+
+    &__observations {
+      text-align: right;
+      color: var(--color-text-secondary, #9baec8);
+      font-variant-numeric: tabular-nums;
+    }
+
+    &__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 4px;
+    }
+  }
+
+  &__footer {
+    padding: 8px 16px 0;
+  }
+}
+
 .featured-carousel {
   overflow: hidden;
   flex-shrink: 0;

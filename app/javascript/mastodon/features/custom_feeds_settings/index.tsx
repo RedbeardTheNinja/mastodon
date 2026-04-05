@@ -3,20 +3,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { defineMessages, useIntl, FormattedMessage } from 'react-intl';
 
 import { Helmet } from 'react-helmet';
+import { Link } from 'react-router-dom';
 
 import AddIcon from '@/material-icons/400-24px/add.svg?react';
+import SettingsIcon from '@/material-icons/400-24px/settings.svg?react';
 import TuneIcon from '@/material-icons/400-24px/tune.svg?react';
 import SquigglyArrow from '@/svg-icons/squiggly_arrow.svg?react';
-
 import { fetchCustomFeeds } from 'mastodon/actions/custom_feeds';
 import { fetchLists } from 'mastodon/actions/lists_typed';
+import type { ApiCustomFeedConfigJSON } from 'mastodon/api_types/custom_feeds';
 import { Column } from 'mastodon/components/column';
 import { ColumnHeader } from 'mastodon/components/column_header';
 import { Icon } from 'mastodon/components/icon';
 import ScrollableList from 'mastodon/components/scrollable_list';
 import { useAppDispatch, useAppSelector } from 'mastodon/store';
-
-import type { ApiCustomFeedConfigJSON } from 'mastodon/api_types/custom_feeds';
 
 import { CustomFeedCard } from './components/custom_feed_card';
 import { CustomFeedForm } from './components/custom_feed_form';
@@ -30,6 +30,10 @@ const messages = defineMessages({
     id: 'custom_feeds.add_feed',
     defaultMessage: 'Add custom feed',
   },
+  signals: {
+    id: 'custom_feeds.signals_settings',
+    defaultMessage: 'Algorithm signals',
+  },
 });
 
 const CustomFeedsSettings: React.FC<{ multiColumn?: boolean }> = ({
@@ -39,8 +43,12 @@ const CustomFeedsSettings: React.FC<{ multiColumn?: boolean }> = ({
   const intl = useIntl();
   const [adding, setAdding] = useState(false);
 
-  const handleStartAdding = useCallback(() => { setAdding(true); }, []);
-  const handleStopAdding  = useCallback(() => { setAdding(false); }, []);
+  const handleStartAdding = useCallback(() => {
+    setAdding(true);
+  }, []);
+  const handleStopAdding = useCallback(() => {
+    setAdding(false);
+  }, []);
 
   const configs = useAppSelector((state) => {
     const map = state.customFeeds as unknown as {
@@ -85,17 +93,27 @@ const CustomFeedsSettings: React.FC<{ multiColumn?: boolean }> = ({
         iconComponent={TuneIcon}
         multiColumn={multiColumn}
         extraButton={
-          !adding && (
-            <button
-              type='button'
+          <span className='column-header__buttons'>
+            {!adding && (
+              <button
+                type='button'
+                className='column-header__button'
+                title={intl.formatMessage(messages.addFeed)}
+                aria-label={intl.formatMessage(messages.addFeed)}
+                onClick={handleStartAdding}
+              >
+                <Icon id='plus' icon={AddIcon} />
+              </button>
+            )}
+            <Link
+              to='/custom_feeds/signals'
               className='column-header__button'
-              title={intl.formatMessage(messages.addFeed)}
-              aria-label={intl.formatMessage(messages.addFeed)}
-              onClick={handleStartAdding}
+              title={intl.formatMessage(messages.signals)}
+              aria-label={intl.formatMessage(messages.signals)}
             >
-              <Icon id='plus' icon={AddIcon} />
-            </button>
-          )
+              <Icon id='settings' icon={SettingsIcon} />
+            </Link>
+          </span>
         }
       />
 
@@ -106,9 +124,7 @@ const CustomFeedsSettings: React.FC<{ multiColumn?: boolean }> = ({
         prepend={
           adding && (
             <div className='custom-feed-new'>
-              <CustomFeedForm
-                onClose={handleStopAdding}
-              />
+              <CustomFeedForm onClose={handleStopAdding} />
             </div>
           )
         }

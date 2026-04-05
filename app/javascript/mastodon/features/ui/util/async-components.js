@@ -48,6 +48,10 @@ export function CustomFeedsSettings () {
   return import('../../custom_feeds_settings');
 }
 
+export function CustomFeedsSignals () {
+  return import('../../custom_feeds_signals');
+}
+
 export function Collections() {
   return import('../../collections').then(
     module => ({default: module.Collections})

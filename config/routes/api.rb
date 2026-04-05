@@ -255,6 +255,12 @@ namespace :api, format: false do
 
     resources :custom_feeds, only: [:index, :create, :show, :update, :destroy]
 
+    resources :recommendation_signals, only: [:index, :update, :destroy] do
+      collection do
+        delete :destroy_all, action: :destroy_all
+      end
+    end
+
     namespace :featured_tags do
       get :suggestions, to: 'suggestions#index'
     end
