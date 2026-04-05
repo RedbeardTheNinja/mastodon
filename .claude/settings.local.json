@@ -1,11 +1,17 @@
 {
   "permissions": {
     "allow": [
+      "Read(//mnt/c/Users/antyp/IdeaProjects/**)",
+
+      "Bash(docker exec:*)",
+      "Bash(docker ps:*)",
+
       "Bash(git log:*)",
       "Bash(git diff:*)",
       "Bash(git show:*)",
       "Bash(git status:*)",
       "Bash(git fetch:*)",
+      "Bash(git -C \"C:\\Users\\antyp\\IdeaProjects\\mastodon\":*)",
 
       "Bash(ls:*)",
       "Bash(ps aux:*)",

@@ -2,6 +2,8 @@
 
 Runs in production mode (`RAILS_ENV=production`, database `mastodon_production`, domain `redbeardthe.ninja`). Ruby via rbenv at `/home/mastodon/.rbenv`. App runs as the `mastodon` user. Services managed by systemd.
 
+**Default behavior: run all commands as the `mastodon` user via `sudo -u mastodon ...` unless the user explicitly asks otherwise.**
+
 ## Running Commands
 
 ```bash
@@ -12,7 +14,10 @@ sudo -u mastodon bash -c 'export PATH="/home/mastodon/.rbenv/shims:/home/mastodo
 sudo -u mastodon psql -d mastodon_production -c "SELECT ..."
 
 # Query Redis directly
-redis-cli ZCARD feed:home:{account_id}
+sudo -u mastodon redis-cli ZCARD feed:home:{account_id}
+
+# Git operations
+sudo -u mastodon git ...
 ```
 
 ## Restarting Services
