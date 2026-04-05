@@ -545,6 +545,7 @@ The settings UI needs to handle algorithmic feeds differently from standard feed
 | 15 | Frontend: algorithm options + algorithmic filter components | Step 14 |
 | 16 | API: permit `feed_type` + `algorithmic_filter` phase | — |
 | 17 | *(Optional)* `Recommendations::Algorithms::NaiveBayes` + `rumale` gem + training worker | Steps 3–5 |
+| 18 | Update `customizations/README.md`, `recommendations.md`, and `custom-feeds.md` to document algorithmic feeds: Redis key patterns, new DB tables, worker architecture, and signal collection | Steps 1–16 |
 
 Steps 1–13 are backend only and fully testable before the frontend work.
 
@@ -601,3 +602,142 @@ Steps 1–13 are backend only and fully testable before the frontend work.
 **Standard filters run at ingest time (pre-filter); algorithmic filters run after scoring.** `blocked_tags` and `interacted_posts` are cheap binary decisions that can reduce queue size early. Algorithmic filters like `min_score` need the score and so run in the algorithm worker. Both filter types appear in the same UI section for algorithmic feeds but are clearly labelled.
 
 **Feed type is on the config, not the list.** A list can be repurposed from a standard feed to an algorithmic feed by changing `feed_type`. The list itself carries no semantics. This is consistent with the existing design where `CustomFeedConfig` is the only entity that controls feed behaviour.
+
+---
+
+## Algorithm Extension Plan
+
+This section describes what to build after `AffinityScore` is running and producing results. Do not start this work until step 16 is complete and the feed is being used in production — measure first, then extend.
+
+### Phase 1: Observe and Instrument (no code changes required)
+
+Before adding new algorithms, instrument what's already there:
+
+- Log the score distribution (min, max, p50, p95) each time `AlgorithmicFeedWorker` runs, tagged by `config_id`. This tells you whether `min_score` thresholds need adjustment and whether the affinity values have stabilised.
+- Log promotion rate per run (candidates dequeued vs. candidates promoted). A very low rate suggests the `min_score` threshold is too tight or signals are sparse.
+- Log pending queue depth over time. Growing queues indicate the worker cadence is too slow or the sources are over-producing.
+- Track `observation_count` distribution on `recommendation_signals`. Accounts with very few observations will have unreliable scores — `min_signals` should gate them out.
+
+When these metrics look healthy (stable score distribution, >10% promotion rate, bounded queue depth), move to Phase 2.
+
+### Phase 2: Naive Bayes Classifier
+
+This is step 17 in the implementation order. The goal is a trained per-account classifier that produces calibrated probability-of-engagement scores rather than raw affinity sums.
+
+**Training data design:**
+- Positive examples: statuses that the account reblogged, replied to, or liked (already in `recommendation_signals` — reconstruct from `entity_id` where `signal_type = 'account'` and join to `Status`). A cleaner approach is to log a `training_example` row at signal time with `(account_id, status_id, label: 'positive')`.
+- Negative examples: statuses that passed filters but were _not_ interacted with. These need to be sampled. A `training_examples` table with `label: 'negative'` should be populated by the `AlgorithmicFeedWorker` when it promotes candidates — log a negative for each promoted-but-later-ignored post (i.e. posts that were in the feed and expired without interaction).
+- Ratio: aim for ~5:1 negative:positive to reflect realistic class imbalance. `ComplementNB` tolerates higher imbalance but scores become harder to threshold.
+
+**Training table:**
+
+```ruby
+create_table :recommendation_training_examples do |t|
+  t.references :account,  null: false, foreign_key: true
+  t.bigint     :status_id, null: false
+  t.string     :label,    null: false  # 'positive' | 'negative'
+  t.timestamps
+  t.index [:account_id, :status_id, :label], unique: true,
+          name: 'idx_training_examples_lookup'
+end
+```
+
+**Model storage:**
+
+```ruby
+create_table :recommendation_models do |t|
+  t.references :account,       null: false, foreign_key: true
+  t.string     :algorithm_key, null: false  # 'naive_bayes'
+  t.text       :serialized,    null: false  # Marshal.dump or JSON
+  t.integer    :positive_count, null: false, default: 0
+  t.integer    :negative_count, null: false, default: 0
+  t.datetime   :trained_at
+  t.timestamps
+  t.index [:account_id, :algorithm_key], unique: true
+end
+```
+
+Use `Marshal.dump` for the `Rumale` model object (it serialises cleanly). Store as base64 in a `text` column or a `bytea` column.
+
+**Training worker:**
+
+```ruby
+# app/workers/recommendations/model_training_worker.rb
+# Triggered when: new training examples are logged AND the count crosses a
+# threshold (default 10 new examples since last training).
+# Debounce: at most once per hour per account.
+class ModelTrainingWorker
+  include Sidekiq::Worker
+  sidekiq_options queue: 'default', retry: 2
+
+  MIN_POSITIVE = 30   # don't train until we have enough positive examples
+  RETRAIN_AFTER_NEW = 10  # retrain after this many new examples since last train
+
+  def perform(account_id)
+    account  = Account.find(account_id)
+    examples = RecommendationTrainingExample.where(account: account)
+
+    pos_count = examples.where(label: 'positive').count
+    return if pos_count < MIN_POSITIVE
+
+    # Build feature matrix and label vector
+    # (feature extraction identical to NaiveBayes#build_features)
+    x, y = build_training_data(account, examples)
+    model = Rumale::NaiveBayes::ComplementNB.new(smoothing_param: 1.0)
+    model.fit(x, y)
+
+    RecommendationModel.upsert(
+      {
+        account_id:     account.id,
+        algorithm_key:  'naive_bayes',
+        serialized:     Base64.strict_encode64(Marshal.dump(model)),
+        positive_count: pos_count,
+        negative_count: examples.where(label: 'negative').count,
+        trained_at:     Time.current,
+        created_at:     Time.current,
+        updated_at:     Time.current,
+      },
+      on_duplicate: Arel.sql(
+        "serialized = EXCLUDED.serialized, " \
+        "positive_count = EXCLUDED.positive_count, " \
+        "negative_count = EXCLUDED.negative_count, " \
+        "trained_at = EXCLUDED.trained_at, " \
+        "updated_at = EXCLUDED.updated_at"
+      ),
+      unique_by: [:account_id, :algorithm_key]
+    )
+  end
+end
+```
+
+**Retraining cadence:** the training worker is enqueued by `SignalWorker` after every `RETRAIN_AFTER_NEW` new positive signals. A Redis counter per account (`rec:signal_count:{account_id}`) tracks signals since last training; when it crosses the threshold the worker is enqueued and the counter resets. Add `sidekiq-unique-jobs` or a Redis `SET NX` lock to enforce the per-hour debounce.
+
+**Fallback:** `NaiveBayes#score_one` loads the model from `recommendation_models` at the start of each `score_batch` call. If no model exists (or it's older than 7 days), it delegates to `AffinityScore#score_one` for that account.
+
+### Phase 3: Further Algorithm Ideas
+
+These are not planned for immediate implementation but worth considering once Naive Bayes is working:
+
+**Collaborative filtering (user-based):**
+- Find accounts with similar signal profiles (cosine similarity over tag affinity vectors).
+- Score candidates based on what similar accounts interacted with.
+- Requires an offline similarity computation job; expensive at scale but effective for cold-start accounts with few personal signals.
+- Could use Mastodon's existing follow graph as a similarity proxy (follows → similar taste → weight their interactions).
+
+**Content similarity (TF-IDF or embeddings):**
+- Build a TF-IDF document vector per status from its text + tags.
+- Maintain a "user interest vector" (weighted average of interacted-post vectors).
+- Score candidates by cosine similarity to the interest vector.
+- Works for accounts that interact with specific topics whose tag coverage is sparse.
+- Embeddings (sentence-transformers via a small Ruby FFI or HTTP sidecar) would improve this significantly but add infrastructure complexity.
+
+**Two Towers (deferred):**
+- Only worth considering if the server has enough traffic to justify a trained neural model.
+- Requires: positive/negative interaction logs, a Python training pipeline, periodic retraining, and a serving path (likely HTTP sidecar or pre-computed embedding index).
+- The `Algorithms::Base` interface is already compatible — a `TwoTowers` class could call a local HTTP endpoint in `score_batch`.
+- Recommended approach if/when adopted: train offline on PostgreSQL interaction data via `pg` gem or CSV export, serve via a lightweight FastAPI endpoint on the same host, call it from `AlgorithmicFeedWorker` with a short timeout and an `AffinityScore` fallback.
+
+**Recency-aware diversity:**
+- After scoring, apply a Maximal Marginal Relevance (MMR) step to reduce redundancy in the promoted batch: prefer candidates that are both high-scoring and dissimilar to already-promoted posts in the same run.
+- Tag-based dissimilarity is a cheap proxy: penalise candidates whose tag set overlaps heavily with already-selected posts.
+- Implement as an additional `algorithmic_filter` step so it's opt-in per config.
