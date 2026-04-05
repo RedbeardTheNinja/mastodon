@@ -22,7 +22,9 @@ module CustomFeeds
 
     module ClassMethods
       def registry
-        @registry
+        return @registry if instance_variable_defined?(:@registry)
+
+        superclass.registry
       end
 
       def key
