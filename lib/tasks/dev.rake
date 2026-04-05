@@ -446,7 +446,7 @@ namespace :dev do
     end
   end
 
-  desc 'Add a "New To Me" list to the admin account and seed it with sample posts. Safe to run multiple times.'
+  desc 'Add a "New To Me" custom feed list to the admin account and seed it with sample posts. Safe to run multiple times.'
   task setup_new_to_me: :environment do
     admin_user = User.find_by(email: 'admin@localhost') || User.admins.first
     abort 'Could not find admin user. Run bin/setup first.' unless admin_user
@@ -481,8 +481,21 @@ namespace :dev do
 
       # Create the "New To Me" list and add the poster to it
       ntm_list = List.create_with(
-        title: NewToMe::LIST_TITLE
-      ).find_or_create_by!(account: admin_account, title: NewToMe::LIST_TITLE)
+        title: 'New To Me'
+      ).find_or_create_by!(account: admin_account, title: 'New To Me')
+
+      # Ensure the list has a CustomFeedConfig with the standard NTM pipeline
+      ntm_config = CustomFeedConfig.find_or_initialize_by(list: ntm_list, account: admin_account)
+      unless ntm_config.persisted?
+        ntm_config.enabled = true
+        ntm_config.save!
+        [
+          { phase: 'source',            step_type: 'followed_posts',   position: 0 },
+          { phase: 'filter',            step_type: 'interacted_posts', position: 0 },
+          { phase: 'removal_strategy',  step_type: 'on_interaction',   position: 0 },
+          { phase: 'overflow_strategy', step_type: 'oldest_first',     position: 0 },
+        ].each { |attrs| CustomFeedStep.create!(custom_feed_config: ntm_config, **attrs) }
+      end
       ListAccount.find_or_create_by!(list: ntm_list, account: ntm_poster)
       # Plain text post
       plain_post = Status.create_with(
@@ -493,7 +506,7 @@ namespace :dev do
 
       # Post with hashtags
       tagged_post = Status.create_with(
-        text: "This post has hashtags to help you discover it. #NewToMe #Mastodon #FediDev",
+        text: 'This post has hashtags to help you discover it. #NewToMe #Mastodon #FediDev',
         account: ntm_poster,
         visibility: :public
       ).find_or_create_by!(id: 11_000_001)
@@ -552,15 +565,15 @@ namespace :dev do
         in_reply_to_account_id: ntm_poster.id
       ).find_or_create_by!(id: 11_000_006)
 
-      # Populate the NTM Redis feed directly for the admin account
-      ntm_manager = NewToMe::FeedManager.instance
+      # Populate the custom feed Redis key directly
+      cf_manager = CustomFeeds::FeedManager.instance
       [plain_post, tagged_post, cw_post, poll_post, unlisted_post, media_post, reply_post].each do |status|
-        ntm_manager.push(admin_account, status)
+        cf_manager.push(ntm_config, status)
       end
 
-      feed_size = RedisConnection.with { |r| r.zcard(NewToMe::FeedManager.instance.key(admin_account.id)) }
+      feed_size = RedisConnection.with { |r| r.zcard(cf_manager.key(ntm_list.id)) }
       puts "New To Me list created: \"#{ntm_list.title}\" (id: #{ntm_list.id})"
-      puts "Seeded #{feed_size} posts into the New To Me feed for @#{admin_account.username}"
+      puts "Seeded #{feed_size} posts into the custom feed for @#{admin_account.username}"
       puts "Visit: http://localhost:3000/lists/#{ntm_list.id}"
     end
   end
