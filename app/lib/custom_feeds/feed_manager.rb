@@ -14,6 +14,14 @@ module CustomFeeds
       "feed:custom:#{list_id}"
     end
 
+    # Redis key for the insertion-time hash: status_id (string) → unix timestamp.
+    # Used by TimeBasedRemovalWorker to track how long each post has been in the feed.
+    # @param [Integer] list_id
+    # @return [String]
+    def inserted_at_key(list_id)
+      "feed:custom:#{list_id}:inserted_at"
+    end
+
     # Add a status to a custom feed, respecting the config's overflow strategy.
     # Returns false without inserting if the overflow strategy blocks capacity.
     # @param [CustomFeedConfig] config
@@ -27,6 +35,7 @@ module CustomFeeds
       return false if overflow.at_capacity?(redis.zcard(feed_key), max)
 
       redis.zadd(feed_key, status.id, status.id)
+      redis.hset(inserted_at_key(config.list_id), status.id, Time.now.to_i)
       overflow.trim(redis, feed_key, max)
       true
     end
@@ -37,6 +46,7 @@ module CustomFeeds
     # @return [void]
     def remove(config, status_id)
       redis.zrem(key(config.list_id), status_id)
+      redis.hdel(inserted_at_key(config.list_id), status_id)
     end
 
     # Push a status and publish a streaming update event on the list channel.
