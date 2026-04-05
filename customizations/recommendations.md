@@ -1,150 +1,140 @@
-# Recommendations as Custom Feed Plugins
+# Algorithmic Feeds
 
-Recommendation feeds are implemented as **custom feed sources and filters**, not as a separate parallel system. A "Recommendations" feed is an ordinary `CustomFeedConfig` tied to any Mastodon List, configured via the Custom Feeds settings page with one or more pull sources and a scoring filter.
-
-This replaces the original standalone `Recommendations::*` architecture. The separate `recommendation_configs` table, `Recommendations::FeedManager`, `Recommendations::ListControllerConcern`, and `config/initializers/recommendations.rb` are all eliminated. Everything flows through the existing custom feeds pipeline.
-
----
-
-## Status
-
-| Layer                                | Status        |
-| ------------------------------------ | ------------- |
-| Pull sources (`remote_tag_timeline`, `remote_public_timeline`) | ✅ Shipped |
-| Push source (`followed_posts`)        | ✅ Shipped |
-| Filters: `friends_liked`, `interacted_posts`, `blocked_tags` | ✅ Shipped |
-| Removal: `on_interaction`, `time_based` | ✅ Shipped |
-| Overflow: `oldest_first`, `no_overflow` | ✅ Shipped |
-| Multi-provider UI (add/remove steps per phase) | ✅ Shipped |
-| Pull cadence + scheduler              | ✅ Shipped |
-| Per-bucket cursors (`custom_feed_pull_cursors`) | ✅ Shipped |
-| Insertion-time tracking (`inserted_at` hash) | ✅ Shipped |
-| Home-feed isolation (feeds.remove event) | ✅ Shipped |
-| `RecommendationScore` filter          | ❌ Not yet built |
-| `Recommendations::Algorithms` namespace | ❌ Not yet built |
-| `Recommendations::Algorithms::FriendsLikedScore` | ❌ Not yet built |
-| `RecommendationSignal` model + table  | ❌ Not yet built |
-| `Recommendations::LearnWorker`        | ❌ Not yet built |
-
----
-
-## What the User Configures
-
-In the Custom Feeds settings page, a user creates a config on any list and sets:
-
-| Phase    | Option                          | Example                                                       |
-| -------- | ------------------------------- | ------------------------------------------------------------- |
-| Source   | `remote_public_timeline`        | mastodon.social public timeline (multi-server array)         |
-| Source   | `remote_tag_timeline`           | mastodon.social posts tagged `#rustlang` (multi-server array) |
-| Source   | `followed_posts`                | Home feed posts from accounts you follow                      |
-| Filter   | `interacted_posts`              | Hide posts you've already interacted with                     |
-| Filter   | `friends_liked`                 | Only posts that at least N follows have favourited or boosted |
-| Filter   | `blocked_tags`                  | Exclude posts containing any configured tag                   |
-| Filter   | `recommendation_score`          | ❌ Algorithmic scoring; exclude posts below threshold         |
-| Removal  | `on_interaction`                | Remove once you favourite/boost/reply                         |
-| Removal  | `time_based`                    | Remove after a configured number of minutes/hours             |
-| Overflow | `oldest_first` or `no_overflow` | Standard overflow behaviour                                   |
-
-Each source and filter step stores its parameters in `custom_feed_steps.options` (JSONB). No additional tables are required for configuration.
+An **algorithmic feed** is a new variant of `CustomFeedConfig` that routes candidates through a scoring pipeline before deciding what enters the feed, rather than the direct filter-then-push model used by standard custom feeds. This document covers everything that has not yet been built.
 
 ---
 
 ## What Is Already Built
 
-### Pipeline Architecture
-
-The full multi-provider pipeline is in production. Key design points as actually implemented:
-
-- `Sources::Base` has `pull_source?` flag and `fetch_candidates` returning a `FetchResult` struct (not a plain array):
-  ```ruby
-  FetchResult = Struct.new(:max_remote_id, :statuses)
-  ```
-  `max_remote_id` is the highest raw API `id` seen in the response (advances the cursor even when statuses fail to resolve). `statuses` is the array of resolved `Status` records.
-
-- `Sources::Base#resolve_uris` checks `Status.find_by(uri: uri)` before calling `ResolveURLService`. This avoids redundant HTTP round-trips and prevents `ActivityPub::Activity::Create#distribute` from triggering for already-known statuses (which would insert them into the home feeds of local followers).
-
-- `PullSourceIngestWorker` uses explicit `account.blocking?` / `account.muting?` / `account.domain_blocking?` checks rather than `FeedManager.filter(:home, ...)`. The `filter_from_home` method applies home-feed-specific rules (language filters, exclusive-list skip flags) that are not appropriate for custom feeds.
-
-- `CustomFeeds::FeedManager#remove_and_stream` publishes `event: 'feeds.remove'` (not `event: :delete`). The standard `delete` event calls `deleteFromTimelines()` in the frontend which removes the status from every timeline in the Redux store; `feeds.remove` only removes it from the specific list timeline.
-
-- `CustomFeeds::FeedManager` maintains a companion Redis hash `feed:custom:{list_id}:inserted_at` mapping `status_id → unix_timestamp`. Written on `push`, deleted on `remove`. Used by `TimeBasedRemovalWorker` to measure how long a post has been in the feed (vs. when it was created, which is what the snowflake ID encodes).
-
-### Existing Pipeline Entry Points
-
-```
-Home-feed delivery (push sources):
-  FeedInsertWorker → FeedInsertConcern#perform_push → super (home feed) +
-  CustomFeeds::FeedInsertWorker → Pipeline#include? → push to feed:custom:{list_id}
-
-Scheduled pull sources:
-  SchedulePullSourcesWorker (every 5 min) → PullSourceIngestWorker →
-  Pipeline#pull_source_entries → fetch_candidates per bucket →
-  FetchResult → cursor update → Pipeline#passes_filters? → push to feed:custom:{list_id}
-
-Interaction removal:
-  FavouriteConcern / StatusConcern → FeedRemoveWorker →
-  Pipeline#remove_on? → FeedManager#remove_and_stream
-
-Time-based removal:
-  TimeBasedRemovalWorker (every 5 min) → inserted_at hash → remove expired posts
-```
+The full standard custom feed pipeline is shipped (pull sources, push sources, standard filters, removal strategies, overflow strategies, frontend UI, workers, cursors). Algorithmic feeds extend this foundation; they share all source types and standard filters but add a new pipeline stage between ingest and feed insertion.
 
 ---
 
-## Remaining Work: Recommendation Scoring
+## How Algorithmic Feeds Differ From Standard Custom Feeds
 
-### `CustomFeeds::Filters::RecommendationScore`
-
-A new filter plugin. Delegates scoring to a registered algorithm and excludes candidates below `min_score`.
-
-```ruby
-# app/lib/custom_feeds/filters/recommendation_score.rb
-module CustomFeeds
-  module Filters
-    class RecommendationScore < Base
-      def self.key
-        'recommendation_score'
-      end
-
-      # options keys:
-      #   algorithm  (string, default 'friends_liked_score')
-      #   min_score  (float,  default 0.5)
-
-      def exclude?(status, account, options = {})
-        algo_key  = options.fetch('algorithm', 'friends_liked_score')
-        min_score = options.fetch('min_score', 0.5).to_f
-        algo      = Recommendations::Algorithms::REGISTRY[algo_key]
-        return true if algo.nil? # unknown algorithm → exclude
-
-        algo.new(account).score_one(status) < min_score
-      end
-    end
-  end
-end
+### Standard custom feed pipeline
+```
+Sources → (standard filters) → feed:custom:{list_id}
 ```
 
-Register in `config/initializers/custom_feeds.rb`:
-```ruby
-CustomFeeds::Filters::RecommendationScore.register!
+### Algorithmic feed pipeline
+```
+Sources → (standard pre-filters) → feed:algo:{list_id}:pending
+                                         ↓  (periodic algorithm worker)
+                                    score each candidate
+                                         ↓
+                               (algorithmic filters, e.g. min_score)
+                                         ↓
+                                  feed:custom:{list_id}
 ```
 
-Add to `PHASE_OPTIONS.filter` in `custom_feed_form.tsx` and create a `recommendation_score_options.tsx` component (algorithm selector + min_score slider/input).
+**Key differences:**
+- Candidates are staged in a pending queue rather than pushed directly to the feed
+- The algorithm worker runs on its own schedule, scores queued candidates, and makes promotion decisions
+- Algorithmic filters (min_score, top_k_per_batch) require a score, so they are evaluated by the algorithm worker, not the ingest worker
+- Standard filters (blocked_tags, interacted_posts, friends_liked) can still be applied as pre-filters at ingest time to reduce queue size
+- The algorithm worker can observe the full pending batch before deciding, enabling relative ranking (e.g. "top 10 from this batch") rather than per-post binary decisions
 
 ---
 
-### `Recommendations::Algorithms` Namespace
+## New Database Columns
+
+### `feed_type` on `custom_feed_configs`
 
 ```ruby
-# app/lib/recommendations.rb
-module Recommendations
-  module Algorithms
-    REGISTRY = {} # rubocop:disable Style/MutableConstant
-  end
-end
+# db/migrate/TIMESTAMP_add_feed_type_to_custom_feed_configs.rb
+add_column :custom_feed_configs, :feed_type, :string, null: false, default: 'standard'
+add_index  :custom_feed_configs, :feed_type
+```
 
+Values: `'standard'` (existing behaviour) | `'algorithmic'`. The existing pipeline is completely unchanged for `standard` configs.
+
+---
+
+## New Phase: `algorithm`
+
+Algorithmic feeds gain a new pipeline phase between sources and filters:
+
+| Phase               | Standard feeds | Algorithmic feeds |
+| ------------------- | -------------- | ----------------- |
+| `source`            | ✅             | ✅ (same types)   |
+| `filter`            | ✅ (standard filters) | ✅ pre-filter at ingest |
+| `algorithm`         | ❌ not applicable | ✅ one step, required |
+| algorithmic filters | ❌             | ✅ evaluated by algorithm worker |
+| `removal_strategy`  | ✅             | ✅ (same types)   |
+| `overflow_strategy` | ✅             | ✅ (same types)   |
+
+`Pipeline` detects algorithmic feeds via `config.feed_type == 'algorithmic'` and routes accordingly. `PullSourceIngestWorker` checks `pipeline.algorithmic?` and pushes to the pending queue instead of the feed.
+
+---
+
+## Pending Queue
+
+```
+Redis key:  feed:algo:{list_id}:pending
+Type:       sorted set
+Score:      unix timestamp of when the candidate arrived
+Member:     status_id
+```
+
+The pending queue is a Redis sorted set scored by arrival time. It acts as a bounded staging area:
+
+- **Max size**: same `FeedManager::MAX_ITEMS` cap. If the queue is full, the oldest entry is evicted before the new one is added (same `OldestFirst` trim logic used by the main feed).
+- **Expiry**: candidates older than `max_pending_age_hours` (configurable per config, default 48h) are discarded by the algorithm worker without scoring. This prevents the worker from spending time scoring stale content.
+- **Deduplication**: `ZSCORE` check before `ZADD` — same status is not queued twice.
+
+`CustomFeeds::FeedManager` gains `pending_key(list_id)`, `enqueue_candidate(config, status)`, and `dequeue_pending(list_id, limit:, max_age_hours:)` methods.
+
+---
+
+## Signal Collection
+
+The algorithm learns from the configured account's interaction history. Three interaction types contribute signals with different weights:
+
+| Interaction | Weight | Reasoning |
+| ----------- | ------ | --------- |
+| Reblog (boost) | 2.0 | Explicit endorsement; high confidence signal |
+| Reply | 2.0 | Deep engagement; high confidence signal |
+| Favourite (like) | 0.5 | Mild positive signal; lower confidence |
+
+When an interaction occurs, signals are extracted from the interacted post:
+
+```
+features = {
+  "tag:#{tag.name}"          → weight  (for each tag on the post)
+  "account:#{account_id}"    → weight  (author of the post)
+  "domain:#{account.domain}" → weight * 0.5  (server-level affinity)
+}
+```
+
+Signals are stored in `recommendation_signals` with upsert (accumulate `weight`, increment `observation_count`, update `last_observed_at`). The table design is unchanged from the earlier plan:
+
+```ruby
+create_table :recommendation_signals do |t|
+  t.references :account,          null: false, foreign_key: true
+  t.string     :signal_type,      null: false  # 'tag' | 'account' | 'domain'
+  t.string     :entity_id,        null: false  # tag name | account_id | domain
+  t.float      :weight,           null: false, default: 0.0
+  t.integer    :observation_count, null: false, default: 0
+  t.datetime   :last_observed_at
+  t.timestamps
+  t.index [:account_id, :signal_type, :entity_id],
+          unique: true, name: 'idx_rec_signals_lookup'
+end
+```
+
+`FavouriteConcern` and `StatusConcern` are extended to also enqueue `Recommendations::SignalWorker` when the account has any `algorithmic` feed configs.
+
+---
+
+## Algorithm Plugin Interface
+
+```ruby
 # app/lib/recommendations/algorithms/base.rb
 module Recommendations
   module Algorithms
+    REGISTRY = {} # rubocop:disable Style/MutableConstant
+
     class Base
       def self.key
         raise NotImplementedError
@@ -154,226 +144,460 @@ module Recommendations
         REGISTRY[key] = self
       end
 
+      # @param [Account] account  — the account who owns the feed
       def initialize(account)
         @account = account
       end
 
-      # Score a single status. Used by RecommendationScore filter.
+      # Score a batch of candidates. Returns [{status:, score: Float}] sorted
+      # descending by score. Subclasses can override for batch efficiency.
+      # @param [Array<Status>] candidates
+      # @return [Array<{status: Status, score: Float}>]
+      def score_batch(candidates)
+        candidates
+          .map { |s| { status: s, score: score_one(s) } }
+          .sort_by { |r| -r[:score] }
+      end
+
+      # Score a single status.
       # @param [Status] status
-      # @return [Float] 0.0 – 1.0+
+      # @return [Float]
       def score_one(status)
         0.0
       end
-
-      # Called after user interactions to update RecommendationSignal rows.
-      # @param [String] interaction_type  'favourite' | 'reblog' | 'reply'
-      # @param [Status] status
-      def learn(interaction_type, status); end
     end
   end
 end
 ```
 
+The algorithm worker instantiates `klass.new(account)`, calls `score_batch(candidates)`, then evaluates algorithmic filters on each scored result.
+
 ---
 
-### `Recommendations::Algorithms::FriendsLikedScore`
+## Initial Algorithm: `affinity_score`
 
-Scores by follows' engagement weighted by time decay. The existing `friends_liked` filter is a binary gate; this algorithm scores for ranking so both can coexist independently.
+Weighted feature affinity with time decay. No ML library required. Works from the first interaction and gets more accurate over time.
+
+### Scoring
+
+```
+score(status) =
+  Σ tag_affinity[tag]     (for each tag on the post, capped at 5 tags)
+  + account_affinity[author_id]
+  + domain_affinity[author.domain] × 0.5
+  × exp(-λ × age_in_hours)   where λ = 0.05  (≈ half-life of 14 hours)
+```
+
+All affinity values are loaded from `recommendation_signals` for the account and cached in-memory for the duration of a single `score_batch` call (no per-post queries).
 
 ```ruby
-# app/lib/recommendations/algorithms/friends_liked_score.rb
+# app/lib/recommendations/algorithms/affinity_score.rb
 module Recommendations
   module Algorithms
-    class FriendsLikedScore < Base
+    class AffinityScore < Base
+      DECAY_LAMBDA = 0.05
+      TAG_CAP      = 5
+
       def self.key
-        'friends_liked_score'
+        'affinity_score'
       end
 
-      # score = (favs * 1.0 + reblogs * 2.0) * exp(-0.5 * age_in_days)
-      # Falls back to a small base score from raw counts if no local signal found.
+      def score_batch(candidates)
+        # Load all signals once, cache for the batch
+        @tag_affinities     = load_signals('tag')
+        @account_affinities = load_signals('account')
+        @domain_affinities  = load_signals('domain')
+        super
+      end
+
       def score_one(status)
-        original       = status.reblog? ? status.reblog : status
-        following_ids  = @account.following.pluck(:id)
-        age_in_days    = (Time.now - original.created_at) / 86_400.0
+        original    = status.reblog? ? status.reblog : status
+        age_hours   = (Time.now - original.created_at) / 3600.0
+        time_factor = Math.exp(-DECAY_LAMBDA * age_hours)
 
-        fav_count    = Favourite.where(account_id: following_ids, status_id: original.id).count
-        reblog_count = Status.where(account_id: following_ids, reblog_of_id: original.id).count
-        raw_score    = (fav_count * 1.0) + (reblog_count * 2.0)
-
-        if raw_score > 0
-          raw_score * Math.exp(-0.5 * age_in_days)
-        else
-          # No local signal — derive a small base score from public counts
-          base = (original.favourites_count.to_f + original.reblogs_count.to_f * 2) / 100.0
-          [base * Math.exp(-0.5 * age_in_days), 0.1].min
+        tag_score = original.tags.first(TAG_CAP).sum do |tag|
+          @tag_affinities[tag.name.downcase].to_f
         end
+
+        account_score = @account_affinities[original.account_id.to_s].to_f
+        domain_score  = @domain_affinities[original.account.domain.to_s].to_f * 0.5
+
+        (tag_score + account_score + domain_score) * time_factor
+      end
+
+      private
+
+      def load_signals(signal_type)
+        RecommendationSignal
+          .where(account: @account, signal_type: signal_type)
+          .pluck(:entity_id, :weight)
+          .to_h
       end
     end
   end
 end
 ```
 
-Register in `config/initializers/custom_feeds.rb` alongside the filter:
-```ruby
-Recommendations::Algorithms::FriendsLikedScore.register!
+---
+
+## ML Upgrade Path: `naive_bayes` via `rumale`
+
+Once an account has accumulated enough interactions (suggested threshold: 30+ positive examples), the affinity score can be replaced or augmented with a trained classifier using the [`rumale`](https://github.com/yoshoku/rumale) gem — a Ruby scikit-learn equivalent.
+
+**Why `rumale` + Naive Bayes:**
+- Pure Ruby, no Python or native extensions beyond `numo-narray`
+- **Complement Naive Bayes** (`Rumale::NaiveBayes::ComplementNB`) is specifically designed for imbalanced datasets, which this is (few positives, many negatives — most candidates are not interacted with)
+- Feature vectors are sparse (tag presence + known account/domain booleans) — exactly the domain where Naive Bayes excels
+- Training is fast (one pass over examples) and can run inside a Sidekiq worker
+- Model is small (just class-conditional log-probabilities, serialisable as JSON)
+
+### Feature vector structure
+
 ```
+[
+  tag_1_present?,   # 1 or 0 for each known tag in vocabulary
+  tag_2_present?,
+  ...
+  is_known_account?,     # 1 if account seen in positive examples
+  is_known_domain?,      # 1 if domain seen in positive examples
+  log_followers_count,   # normalised popularity signal
+]
+```
+
+Vocabulary (known tags + known accounts) is built from the account's `recommendation_signals`.
+
+### Training schedule
+
+`Recommendations::ModelTrainingWorker` runs:
+- After every N new signal records (threshold configurable, default 10)
+- At most once per hour per account (debounced)
+
+Trained model is serialised and stored in a `recommendation_models` table or as a JSON blob on the config.
+
+### Serving
+
+At scoring time, the algorithm worker deserialises the model and calls `model.predict_proba(feature_matrix)` to get probability-of-engagement for each candidate. This replaces or supplements the affinity score once the model is available.
+
+**Fallback:** if no trained model exists, fall back to `affinity_score`.
 
 ---
 
-### `RecommendationSignal` Model + Table
+## Algorithmic Filters (exclusive to algorithmic feeds)
 
-Kept for learning algorithms that personalise over time. Not required for `FriendsLikedScore` (which queries live Mastodon data), but needed for any algorithm that learns from interaction history beyond what is already stored in `favourites` and `statuses`.
+These filters are only meaningful in the algorithm worker where a score is available. They cannot be used in standard feeds.
+
+| `step_type`       | Description                                              | Key options                        |
+| ----------------- | -------------------------------------------------------- | ---------------------------------- |
+| `min_score`       | Discard candidates below a score threshold               | `threshold: Float` (default 0.1)   |
+| `top_k_per_batch` | Only promote the top K candidates from each worker run   | `k: Integer` (default 10)          |
+| `min_signals`     | Skip scoring until the account has N signal records      | `count: Integer` (default 5)       |
+
+These live in `Recommendations::AlgorithmicFilters::` (separate namespace from `CustomFeeds::Filters::` so the UI can distinguish them).
+
+---
+
+## Algorithm Worker
 
 ```ruby
-# db/migrate/TIMESTAMP_create_recommendation_signals.rb
-create_table :recommendation_signals do |t|
-  t.references :account,         null: false, foreign_key: true
-  t.string     :signal_type,     null: false  # 'author_affinity' | 'tag_affinity' | 'domain_affinity'
-  t.string     :entity_type,     null: false  # 'account' | 'tag' | 'domain'
-  t.string     :entity_id,       null: false
-  t.float      :weight,          null: false, default: 0.0
-  t.integer    :observation_count, null: false, default: 0
-  t.datetime   :last_observed_at
-  t.timestamps
+# app/workers/recommendations/algorithmic_feed_worker.rb
+module Recommendations
+  class AlgorithmicFeedWorker
+    include Sidekiq::Worker
+    include Redisable
 
-  t.index [:account_id, :signal_type, :entity_type, :entity_id],
-          unique: true, name: 'idx_rec_signals_lookup'
+    sidekiq_options queue: 'default', retry: 3
+
+    # Called periodically by ScheduleAlgorithmicFeedsWorker, or triggered
+    # when the pending queue crosses a size threshold.
+    def perform(config_id)
+      config = CustomFeedConfig.algorithmic.enabled.find_by(id: config_id)
+      return unless config&.account&.user&.signed_in_recently?
+
+      algo_step = config.steps_for('algorithm').first
+      return unless algo_step
+
+      algo_klass = Recommendations::Algorithms::REGISTRY[algo_step.step_type]
+      return unless algo_klass
+
+      account    = config.account
+      algo       = algo_klass.new(account)
+      candidates = dequeue_candidates(config, algo_step.options)
+      return if candidates.empty?
+
+      # Check min_signals gate before any scoring
+      min_signals_filter = config.steps_for('algorithmic_filter')
+                                 .find { |s| s.step_type == 'min_signals' }
+      if min_signals_filter
+        required = min_signals_filter.options.fetch('count', 5).to_i
+        actual   = RecommendationSignal.where(account: account).count
+        return if actual < required
+      end
+
+      scored = algo.score_batch(candidates)
+
+      # Apply algorithmic filters (min_score, top_k)
+      scored = apply_algorithmic_filters(scored, config)
+
+      # Apply standard pipeline filters (blocked_tags etc.) — last gate before promotion
+      pipeline = CustomFeeds::Pipeline.new(config)
+      scored.each do |result|
+        next unless pipeline.passes_filters?(result[:status], account)
+
+        CustomFeeds::FeedManager.instance.push_and_stream(config, result[:status])
+      end
+    end
+
+    private
+
+    def dequeue_candidates(config, options)
+      max_age_hours = options.fetch('max_pending_age_hours', 48).to_i
+      CustomFeeds::FeedManager.instance.dequeue_pending(
+        config.list_id,
+        limit:         options.fetch('batch_size', 100).to_i,
+        max_age_hours: max_age_hours
+      )
+    end
+
+    def apply_algorithmic_filters(scored, config)
+      config.steps_for('algorithmic_filter').each do |step|
+        scored = case step.step_type
+                 when 'min_score'
+                   threshold = step.options.fetch('threshold', 0.1).to_f
+                   scored.select { |r| r[:score] >= threshold }
+                 when 'top_k_per_batch'
+                   k = step.options.fetch('k', 10).to_i
+                   scored.first(k)
+                 else
+                   scored
+                 end
+      end
+      scored
+    end
+  end
 end
 ```
 
-`FriendsLikedScore` does not require this table — it reads directly from `favourites` and `statuses`. Only implement this when building an algorithm that stores learned weights.
+### Scheduler
+
+```ruby
+# app/workers/recommendations/schedule_algorithmic_feeds_worker.rb
+module Recommendations
+  class ScheduleAlgorithmicFeedsWorker
+    include Sidekiq::Worker
+    sidekiq_options queue: 'scheduler', retry: 0
+
+    def perform
+      CustomFeedConfig
+        .algorithmic
+        .enabled
+        .where(
+          "last_pulled_at IS NULL OR " \
+          "last_pulled_at + (pull_cadence_minutes * interval '1 minute') <= NOW()"
+        )
+        .find_each { |config| AlgorithmicFeedWorker.perform_async(config.id) }
+    end
+  end
+end
+```
+
+Add to `config/sidekiq.yml`:
+```yaml
+recommendations_algorithmic_feeds:
+  every: '5m'
+  class: Recommendations::ScheduleAlgorithmicFeedsWorker
+  queue: scheduler
+```
 
 ---
 
-### `Recommendations::LearnWorker`
-
-Enqueued by `CustomFeeds::FavouriteConcern` and `CustomFeeds::StatusConcern` when the account has a `recommendation_score` filter configured.
+## Signal Worker
 
 ```ruby
-# app/workers/recommendations/learn_worker.rb
+# app/workers/recommendations/signal_worker.rb
 module Recommendations
-  class LearnWorker
+  class SignalWorker
     include Sidekiq::Worker
     sidekiq_options queue: 'default', retry: 3
 
+    WEIGHTS = {
+      'reblog'    => 2.0,
+      'reply'     => 2.0,
+      'favourite' => 0.5,
+    }.freeze
+
+    DOMAIN_MULTIPLIER = 0.5
+
     def perform(interaction_type, status_id, account_id)
       account = Account.find(account_id)
-      status  = Status.find(status_id)
+      return unless CustomFeedConfig.algorithmic.enabled.where(account: account).exists?
 
-      has_score_filter = CustomFeedConfig
-        .enabled
-        .where(account: account)
-        .joins(:custom_feed_steps)
-        .where(custom_feed_steps: { phase: 'filter', step_type: 'recommendation_score' })
-        .exists?
-      return unless has_score_filter
+      status   = Status.find(status_id)
+      original = status.reblog? ? status.reblog : status
+      weight   = WEIGHTS.fetch(interaction_type, 0.0)
+      return if weight.zero?
 
-      Algorithms::REGISTRY.each_value do |klass|
-        klass.new(account).learn(interaction_type, status)
+      # Tag signals
+      original.tags.each do |tag|
+        upsert_signal(account, 'tag', tag.name.downcase, weight)
       end
+
+      # Account signal
+      upsert_signal(account, 'account', original.account_id.to_s, weight)
+
+      # Domain signal (lower weight)
+      upsert_signal(account, 'domain', original.account.domain.to_s, weight * DOMAIN_MULTIPLIER)
     rescue ActiveRecord::RecordNotFound
       true
+    end
+
+    private
+
+    def upsert_signal(account, signal_type, entity_id, weight)
+      RecommendationSignal.upsert(
+        {
+          account_id:        account.id,
+          signal_type:       signal_type,
+          entity_id:         entity_id,
+          weight:            weight,
+          observation_count: 1,
+          last_observed_at:  Time.current,
+          created_at:        Time.current,
+          updated_at:        Time.current,
+        },
+        on_duplicate: Arel.sql(
+          "weight = recommendation_signals.weight + EXCLUDED.weight, " \
+          "observation_count = recommendation_signals.observation_count + 1, " \
+          "last_observed_at = EXCLUDED.last_observed_at, " \
+          "updated_at = EXCLUDED.updated_at"
+        ),
+        unique_by: :idx_rec_signals_lookup
+      )
     end
   end
 end
 ```
 
-Hook into existing concerns:
+### Wiring into existing concerns
+
+`FavouriteConcern` and `StatusConcern` already hook into every interaction. Add a second enqueue:
 
 ```ruby
 # app/lib/custom_feeds/favourite_concern.rb (addition)
-after_create_commit :enqueue_learn_worker
+after_create_commit :enqueue_signal_worker
 
-def enqueue_learn_worker
-  Recommendations::LearnWorker.perform_async('favourite', status_id, account_id)
+def enqueue_signal_worker
+  Recommendations::SignalWorker.perform_async('favourite', status_id, account_id)
 end
+
+# app/lib/custom_feeds/status_concern.rb (addition inside enqueue_custom_feed_remove_if_interaction)
+Recommendations::SignalWorker.perform_async('reblog', reblog_of_id, account_id) if reblog?
+Recommendations::SignalWorker.perform_async('reply', in_reply_to_id, account_id) if reply?
 ```
 
-```ruby
-# app/lib/custom_feeds/status_concern.rb (addition, inside enqueue_custom_feed_remove_if_interaction)
-if reblog?
-  Recommendations::LearnWorker.perform_async('reblog', reblog_of_id, account_id)
-elsif reply?
-  Recommendations::LearnWorker.perform_async('reply', in_reply_to_id, account_id)
-end
-```
-
-The guard check (`has_score_filter`) is intentionally inside the worker rather than the concerns, to avoid the DB query on every single interaction for users without scoring configured. If the queue is high-traffic this guard can be moved to the concerns at the cost of a per-interaction query.
+The signal worker guards itself: it returns immediately if the account has no enabled algorithmic feed configs.
 
 ---
 
-## Frontend: `recommendation_score_options.tsx`
+## Frontend: Algorithmic Feed Configuration
 
-```tsx
-// app/javascript/mastodon/features/custom_feeds_settings/components/step_options/recommendation_score_options.tsx
-const ALGORITHM_OPTIONS = [
-  { value: 'friends_liked_score', labelId: 'custom_feeds.algorithms.friends_liked_score' },
-];
+The settings UI needs to handle algorithmic feeds differently from standard feeds:
 
-export const RecommendationScoreOptions: React.FC<Props> = ({ options, onChange }) => {
-  const algorithm = (options.algorithm as string | undefined) ?? 'friends_liked_score';
-  const minScore  = (options.min_score  as number | undefined) ?? 0.5;
-  // ... algorithm selector + min_score number input (0.0–1.0)
-};
-```
+1. **Feed type selector** — when creating a config, the user picks Standard or Algorithmic. This sets `feed_type` on the config.
 
-Add to `PHASE_OPTIONS.filter` and `DEFAULT_OPTIONS` in `custom_feed_form.tsx`, and wire into `StepOptionsForm` in `phase_section.tsx`. Add i18n keys:
+2. **Algorithm-first layout for algorithmic feeds:**
+   - Algorithm picker (required, single selection)
+   - Algorithm options (e.g. `batch_size`, `max_pending_age_hours`)
+   - Sources (same multi-provider section as standard feeds)
+   - Standard pre-filters (blocked_tags, interacted_posts, friends_liked — same section but labelled "Pre-filters")
+   - Algorithmic filters (min_score, top_k_per_batch, min_signals — new section, only shown for algorithmic feeds)
+   - Removal strategy (same)
+   - Overflow strategy (same)
 
-```json
-"custom_feeds.filters.recommendation_score": "Recommendation scoring",
-"custom_feeds.algorithms.friends_liked_score": "Friends' engagement (time-decayed)",
-"custom_feeds.step_options.algorithm": "Algorithm",
-"custom_feeds.step_options.min_score": "Minimum score"
-```
+3. **Algorithm options component** (`algorithm_options.tsx`):
+   - For `affinity_score`: no options needed (decay constant is fixed)
+   - For `naive_bayes`: `min_training_examples` setting
 
----
-
-## Implementation Order for Remaining Work
-
-1. `app/lib/recommendations.rb` + `algorithms/base.rb` — namespace and base class
-2. `app/lib/recommendations/algorithms/friends_liked_score.rb` — first algorithm
-3. `app/lib/custom_feeds/filters/recommendation_score.rb` — filter plugin
-4. Register both in `config/initializers/custom_feeds.rb`
-5. Frontend: `recommendation_score_options.tsx` + wire into form
-6. Verify: create a custom feed with `remote_public_timeline` + `recommendation_score` filter
-7. *(Optional)* `db/migrate/*_create_recommendation_signals.rb` + `RecommendationSignal` model + `Recommendations::LearnWorker` — only needed for learning algorithms
-
-`FriendsLikedScore` works entirely from existing Mastodon tables (`favourites`, `statuses`) so steps 1–6 can be completed without any migrations.
+4. **Algorithmic filter components** (`algorithmic_filter_section.tsx`):
+   - `min_score`: slider or number input (0.0–2.0 range; affinity scores are unbounded above 1.0)
+   - `top_k_per_batch`: number input, default 10
+   - `min_signals`: number input, default 5
 
 ---
 
-## What Is Not Built (and Why)
+## Implementation Order
 
-| Original Plan Item                           | Decision                                                                         |
-| -------------------------------------------- | -------------------------------------------------------------------------------- |
-| `recommendation_configs` table               | Replaced by `CustomFeedConfig` + `CustomFeedStep` (options JSONB) ✅            |
-| `recommendation_server_cursors` table        | Replaced by `custom_feed_pull_cursors` (per-step + per-bucket) ✅               |
-| `Recommendations::FeedManager`               | Replaced by `CustomFeeds::FeedManager` ✅                                        |
-| `RecommendationsFeed` model                  | Replaced by `CustomFeedsFeed` ✅                                                  |
-| `RecommendationConfig` ActiveRecord model    | Replaced by `CustomFeedConfig` ✅                                                 |
-| `Recommendations::ListControllerConcern`     | Replaced by `CustomFeeds::ListControllerConcern` ✅                              |
-| `config/initializers/recommendations.rb`     | Merged into `config/initializers/custom_feeds.rb` ✅                             |
-| `LIST_TITLE = 'Recommendations'` magic title | Eliminated; any list with a `CustomFeedConfig` is a custom feed ✅               |
-| `Recommendations::ScheduleIngestionWorker`   | Replaced by `CustomFeeds::SchedulePullSourcesWorker` ✅                          |
-| `Recommendations::IngestCandidatesWorker`    | Replaced by `CustomFeeds::PullSourceIngestWorker` ✅                             |
-| `event: :delete` for feed removal            | Changed to `event: 'feeds.remove'` to avoid purging from all timelines ✅       |
-| Score-based feed ordering                    | Deferred — feed is currently chronological; a score-based overflow strategy is future work |
-| `RecommendationSignal` table + LearnWorker   | Deferred — `FriendsLikedScore` uses live Mastodon data; learning layer only needed for personalised algorithms |
+| Step | Work | Prerequisites |
+| ---- | ---- | ------------- |
+| 1 | Migration: `feed_type` column on `custom_feed_configs` | — |
+| 2 | Migration: `recommendation_signals` table | — |
+| 3 | `RecommendationSignal` model with `upsert_signal` helper | Step 2 |
+| 4 | `Recommendations::Algorithms::Base` + `REGISTRY` | — |
+| 5 | `Recommendations::Algorithms::AffinityScore` | Steps 3–4 |
+| 6 | Register `affinity_score` in initializer | Step 5 |
+| 7 | `Recommendations::SignalWorker` | Step 3 |
+| 8 | Wire signal worker into `FavouriteConcern` + `StatusConcern` | Step 7 |
+| 9 | `CustomFeeds::FeedManager` pending queue methods | — |
+| 10 | Extend `CustomFeeds::Pipeline` with `algorithmic?` flag | Step 1 |
+| 11 | Extend `PullSourceIngestWorker` to route to pending queue for algorithmic configs | Steps 9–10 |
+| 12 | `Recommendations::AlgorithmicFeedWorker` | Steps 5, 9 |
+| 13 | `Recommendations::ScheduleAlgorithmicFeedsWorker` + sidekiq.yml entry | Step 12 |
+| 14 | Frontend: feed type selector + algorithmic layout | — |
+| 15 | Frontend: algorithm options + algorithmic filter components | Step 14 |
+| 16 | API: permit `feed_type` + `algorithmic_filter` phase | — |
+| 17 | *(Optional)* `Recommendations::Algorithms::NaiveBayes` + `rumale` gem + training worker | Steps 3–5 |
+
+Steps 1–13 are backend only and fully testable before the frontend work.
+
+---
+
+## File List
+
+### New Backend Files
+
+| File | Purpose |
+| ---- | ------- |
+| `db/migrate/*_add_feed_type_to_custom_feed_configs.rb` | `feed_type` column |
+| `db/migrate/*_create_recommendation_signals.rb` | Signal weights table |
+| `app/models/recommendation_signal.rb` | Signal model |
+| `app/lib/recommendations/algorithms/base.rb` | Algorithm interface + REGISTRY |
+| `app/lib/recommendations/algorithms/affinity_score.rb` | Weighted affinity algorithm |
+| `app/lib/recommendations/algorithms/naive_bayes.rb` | *(optional)* rumale classifier |
+| `app/workers/recommendations/signal_worker.rb` | Writes signals on interaction |
+| `app/workers/recommendations/algorithmic_feed_worker.rb` | Score + promote candidates |
+| `app/workers/recommendations/schedule_algorithmic_feeds_worker.rb` | Periodic trigger |
+
+### Modified Backend Files
+
+| File | Change |
+| ---- | ------ |
+| `app/lib/custom_feeds/feed_manager.rb` | Add `pending_key`, `enqueue_candidate`, `dequeue_pending` |
+| `app/lib/custom_feeds/pipeline.rb` | Add `algorithmic?` flag |
+| `app/workers/custom_feeds/pull_source_ingest_worker.rb` | Route to pending queue for algorithmic configs |
+| `app/lib/custom_feeds/favourite_concern.rb` | Enqueue `SignalWorker` |
+| `app/lib/custom_feeds/status_concern.rb` | Enqueue `SignalWorker` |
+| `config/initializers/custom_feeds.rb` | Register `AffinityScore` algorithm |
+| `config/sidekiq.yml` | Add algorithmic feeds scheduler |
+
+### New Frontend Files
+
+| File | Purpose |
+| ---- | ------- |
+| `custom_feeds_settings/components/algorithmic_feed_form.tsx` | Algorithm-first layout for algorithmic configs |
+| `step_options/algorithm_options.tsx` | Per-algorithm options |
+| `step_options/algorithmic_filter_options.tsx` | min_score / top_k / min_signals controls |
 
 ---
 
 ## Key Design Decisions
 
-**Recommendation sources and filters are first-class custom feed plugins.** There is no separate management surface, no separate list controller intercept, and no separate Redis key namespace. A "Recommendations" feed is just a `CustomFeedConfig` with pull-source steps and scoring filter steps.
+**Pending queue enables batch ranking.** Pushing directly to the feed (standard pipeline) means each post is evaluated in isolation. The pending queue lets the algorithm worker see N candidates together and pick the best K — which is qualitatively different from a per-post binary decision.
 
-**`FetchResult` struct decouples cursor advancement from resolution success.** The raw API `id` is used to advance the cursor even if `ResolveURLService` fails to resolve the status. This prevents re-fetching statuses that are permanently unresolvable.
+**Affinity score works from the first interaction; Naive Bayes waits for enough data.** The `min_signals` algorithmic filter lets users gate the feed until the algorithm has enough signal to be meaningful. Before that threshold, the pending queue accumulates but nothing is promoted.
 
-**Local DB pre-check before `ResolveURLService`.** `Sources::Base#resolve_uris` checks `Status.find_by(uri: uri)` first. For already-known statuses this avoids an HTTP round-trip and — more importantly — skips `ActivityPub::Activity::Create#distribute`, which would otherwise insert the status into home feeds of local followers via `DistributionWorker`.
+**`rumale` for Naive Bayes — no Python runtime required.** `Rumale::NaiveBayes::ComplementNB` is pure Ruby (backed by `numo-narray`). It handles the imbalanced dataset characteristic of this problem (few positive interactions vs. many candidates). The trained model is a small Ruby object that can be serialised to JSON and cached. Add `gem 'rumale'` and `gem 'numo-narray'` to the Gemfile.
 
-**`FriendsLiked` is a binary filter, not a ranking algorithm.** The original design modelled it as a scoring algorithm. In the custom feeds model it is more natural as a gate: "include this post only if at least N follows have engaged." For ranked results implement a `FriendsLikedScore` algorithm (described above) and use it via the `RecommendationScore` filter.
+**Signals are additive with upsert.** Each new interaction increments `weight` and `observation_count` on the existing row rather than creating a new row. This keeps the table size bounded (one row per account × signal_type × entity_id) and makes scoring queries simple: one `SELECT` per signal type loads everything into a hash.
 
-**`RecommendationScore` filter delegates to algorithm objects.** The filter is the pipeline integration point; the algorithm objects (under `Recommendations::Algorithms::`) do the actual scoring. New algorithms can be added without touching the filter class.
+**Standard filters run at ingest time (pre-filter); algorithmic filters run after scoring.** `blocked_tags` and `interacted_posts` are cheap binary decisions that can reduce queue size early. Algorithmic filters like `min_score` need the score and so run in the algorithm worker. Both filter types appear in the same UI section for algorithmic feeds but are clearly labelled.
 
-**Cursor is per (step, bucket), not per (account, domain).** Pull source step options include the domain and tag, so the cursor is keyed by `custom_feed_step_id + bucket`. If the user changes the domain in the options, the step is replaced wholesale on update and the cursor naturally resets.
-
-**Insertion-time tracking uses a companion Redis hash.** `feed:custom:{list_id}:inserted_at` maps `status_id → unix_timestamp` of when the post entered this specific feed. This powers `time_based` removal correctly — the timer measures time since inclusion, not time since the post was created (which is what the snowflake ID encodes).
+**Feed type is on the config, not the list.** A list can be repurposed from a standard feed to an algorithmic feed by changing `feed_type`. The list itself carries no semantics. This is consistent with the existing design where `CustomFeedConfig` is the only entity that controls feed behaviour.
