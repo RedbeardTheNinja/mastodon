@@ -75,6 +75,17 @@ module CustomFeeds
       @removal_entries.any? { |e| e[:instance].remove_on?(interaction_type, e[:options]) }
     end
 
+    # Returns the delay in seconds before removal should occur, for the first
+    # matching removal strategy that applies. Returns 0 for immediate removal.
+    # @param [String] interaction_type
+    # @return [Integer]
+    def removal_delay_for(interaction_type)
+      entry = @removal_entries.find { |e| e[:instance].remove_on?(interaction_type, e[:options]) }
+      return 0 unless entry
+
+      entry[:instance].delay_for(interaction_type, entry[:options])
+    end
+
     # Returns true if this is an algorithmic feed (candidates go to pending queue).
     def algorithmic?
       @algorithmic

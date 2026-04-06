@@ -30,12 +30,12 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum by (feed_type) (rate(custom_feed_inserts_total[5m]))",
+          "expr": "sum by (feed_type) (rate(ruby_custom_feed_inserts_total[5m]))",
           "legendFormat": "{{feed_type}}",
           "refId": "A"
         },
         {
-          "expr": "rate(sidekiq_jobs_processed_total{job_class=\"FeedInsertWorker\"}[5m])",
+          "expr": "rate(ruby_sidekiq_jobs_total{job_name=\"FeedInsertWorker\"}[5m])",
           "legendFormat": "home (baseline)",
           "refId": "B"
         }
@@ -63,7 +63,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum by (result) (rate(custom_feed_algo_candidates_total[5m]))",
+          "expr": "sum by (result) (rate(ruby_custom_feed_algo_candidates_total[5m]))",
           "legendFormat": "{{result}}",
           "refId": "A"
         }
@@ -92,12 +92,12 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (job_class, le) (rate(sidekiq_job_duration_seconds_bucket{job_class=~\"(CustomFeeds::|Recommendations::).*\"}[5m])))",
-          "legendFormat": "{{job_class}}",
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=~\"(CustomFeeds::|Recommendations::).*\",quantile=\"0.99\"}",
+          "legendFormat": "{{job_name}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (job_class, le) (rate(sidekiq_job_duration_seconds_bucket{job_class=\"FeedInsertWorker\"}[5m])))",
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"FeedInsertWorker\",quantile=\"0.99\"}",
           "legendFormat": "FeedInsertWorker (home baseline)",
           "refId": "B"
         }
@@ -118,7 +118,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sidekiq_queue_latency{name=~\"push|pull|default|scheduler\"}",
+          "expr": "ruby_sidekiq_queue_latency_seconds{queue=~\"push|pull|default|scheduler\"}",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "custom_feed_redis_memory_bytes",
+          "expr": "ruby_custom_feed_redis_memory_bytes",
           "legendFormat": "{{feed_type}}",
           "refId": "A"
         }
@@ -168,7 +168,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "custom_feed_redis_feed_count",
+          "expr": "ruby_custom_feed_redis_feed_count",
           "legendFormat": "{{feed_type}}",
           "refId": "A"
         }
@@ -197,7 +197,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "custom_feed_pg_table_bytes",
+          "expr": "ruby_custom_feed_pg_table_bytes",
           "legendFormat": "{{table_name}}",
           "refId": "A"
         }
@@ -218,7 +218,7 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum by (signal_type) (rate(recommendation_signal_records_total[5m])) * 3600",
+          "expr": "sum by (signal_type) (rate(ruby_recommendation_signal_records_total[5m])) * 3600",
           "legendFormat": "{{signal_type}}",
           "refId": "A"
         }
@@ -278,7 +278,7 @@
           "refId": "A"
         },
         {
-          "expr": "redis_memory_used_bytes - sum(custom_feed_redis_memory_bytes)",
+          "expr": "redis_memory_used_bytes - sum(ruby_custom_feed_redis_memory_bytes)",
           "legendFormat": "Redis (non-feed)",
           "refId": "B"
         }
@@ -287,8 +287,8 @@
 
     {
       "id": 16,
-      "title": "Rails process RSS",
-      "description": "ruby_process_rss_bytes from prometheus_exporter Process instrumentation.  Should be stable; growth indicates a memory leak.",
+      "title": "Sidekiq process RSS",
+      "description": "ruby_rss{type=\"sidekiq\"} from prometheus_exporter.  Should be stable; growth indicates a memory leak.",
       "type": "timeseries",
       "gridPos": { "x": 16, "y": 37, "w": 8, "h": 8 },
       "datasource": "Prometheus",
@@ -299,8 +299,8 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "ruby_process_rss_bytes",
-          "legendFormat": "{{type}}",
+          "expr": "ruby_rss{type=\"sidekiq\"}",
+          "legendFormat": "Sidekiq RSS",
           "refId": "A"
         }
       ]

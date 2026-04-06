@@ -15,6 +15,13 @@ module CustomFeeds
       def remove_on?(_interaction_type, _options = {})
         true
       end
+
+      # @param [String] _interaction_type
+      # @param [Hash] options
+      # @return [Integer]
+      def delay_for(_interaction_type, options = {})
+        options.fetch('delay_seconds', 5).to_i
+      end
     end
   end
 end

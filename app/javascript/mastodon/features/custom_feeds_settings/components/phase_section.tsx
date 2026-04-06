@@ -4,13 +4,13 @@ import { defineMessages, useIntl, FormattedMessage } from 'react-intl';
 import type { MessageDescriptor } from 'react-intl';
 
 import DeleteIcon from '@/material-icons/400-24px/delete.svg?react';
-
 import { Icon } from 'mastodon/components/icon';
 
-import { AlgorithmicFilterOptions } from './step_options/algorithmic_filter_options';
 import { AlgorithmOptions } from './step_options/algorithm_options';
+import { AlgorithmicFilterOptions } from './step_options/algorithmic_filter_options';
 import { BlockedTagsOptions } from './step_options/blocked_tags_options';
 import { FriendsLikedOptions } from './step_options/friends_liked_options';
+import { OnInteractionOptions } from './step_options/on_interaction_options';
 import { RemotePublicTimelineOptions } from './step_options/remote_public_timeline_options';
 import { RemoteTagTimelineOptions } from './step_options/remote_tag_timeline_options';
 import { TimeBasedOptions } from './step_options/time_based_options';
@@ -57,7 +57,9 @@ const StepOptionsForm = ({
     return <RemoteTagTimelineOptions options={options} onChange={onChange} />;
   }
   if (stepType === 'remote_public_timeline') {
-    return <RemotePublicTimelineOptions options={options} onChange={onChange} />;
+    return (
+      <RemotePublicTimelineOptions options={options} onChange={onChange} />
+    );
   }
   if (stepType === 'friends_liked') {
     return <FriendsLikedOptions options={options} onChange={onChange} />;
@@ -65,14 +67,27 @@ const StepOptionsForm = ({
   if (stepType === 'blocked_tags') {
     return <BlockedTagsOptions options={options} onChange={onChange} />;
   }
+  if (stepType === 'on_interaction') {
+    return <OnInteractionOptions options={options} onChange={onChange} />;
+  }
   if (stepType === 'time_based') {
     return <TimeBasedOptions options={options} onChange={onChange} />;
   }
   if (stepType === 'affinity_score') {
     return <AlgorithmOptions options={options} onChange={onChange} />;
   }
-  if (stepType === 'min_score' || stepType === 'top_k_per_batch' || stepType === 'min_signals') {
-    return <AlgorithmicFilterOptions stepType={stepType} options={options} onChange={onChange} />;
+  if (
+    stepType === 'min_score' ||
+    stepType === 'top_k_per_batch' ||
+    stepType === 'min_signals'
+  ) {
+    return (
+      <AlgorithmicFilterOptions
+        stepType={stepType}
+        options={options}
+        onChange={onChange}
+      />
+    );
   }
   return null;
 };
@@ -84,7 +99,12 @@ interface StepRowProps {
   onOptionsChange: (stepType: string, options: Record<string, unknown>) => void;
 }
 
-const StepRow: React.FC<StepRowProps> = ({ draft, label, onRemove, onOptionsChange }) => {
+const StepRow: React.FC<StepRowProps> = ({
+  draft,
+  label,
+  onRemove,
+  onOptionsChange,
+}) => {
   const intl = useIntl();
 
   const handleRemove = useCallback(() => {
@@ -92,7 +112,9 @@ const StepRow: React.FC<StepRowProps> = ({ draft, label, onRemove, onOptionsChan
   }, [onRemove, draft.step_type]);
 
   const handleOptionsChange = useCallback(
-    (opts: Record<string, unknown>) => { onOptionsChange(draft.step_type, opts); },
+    (opts: Record<string, unknown>) => {
+      onOptionsChange(draft.step_type, opts);
+    },
     [onOptionsChange, draft.step_type],
   );
 
@@ -135,7 +157,9 @@ export const PhaseSection: React.FC<Props> = ({
 
   const addedTypes = new Set(drafts.map((d) => d.step_type));
   const atMax = maxSteps !== undefined && drafts.length >= maxSteps;
-  const remaining = atMax ? [] : availableOptions.filter((o) => !addedTypes.has(o.value));
+  const remaining = atMax
+    ? []
+    : availableOptions.filter((o) => !addedTypes.has(o.value));
 
   const handleAddChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -189,7 +213,10 @@ export const PhaseSection: React.FC<Props> = ({
 
       {drafts.length === 0 && remaining.length === 0 && (
         <div className='phase-section__empty'>
-          <FormattedMessage id='custom_feeds.phase.no_options' defaultMessage='No options available' />
+          <FormattedMessage
+            id='custom_feeds.phase.no_options'
+            defaultMessage='No options available'
+          />
         </div>
       )}
     </div>

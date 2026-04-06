@@ -274,6 +274,7 @@ const DEFAULT_OPTIONS: Record<string, Record<string, unknown>> = {
   },
   friends_liked: { min_interactions: 1 },
   blocked_tags: { tags: [''] },
+  on_interaction: { delay_seconds: 5 },
   time_based: { duration_minutes: 60 },
   affinity_score: { batch_size: 100, max_pending_age_hours: 48 },
   min_score: { threshold: 0.1 },
