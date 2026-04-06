@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./promtail:/etc/promtail:ro
-      - /run/log/journal:/run/log/journal:ro
+      - /var/log/journal:/var/log/journal:ro
       - /etc/machine-id:/etc/machine-id:ro
     command: -config.file=/etc/promtail/promtail.yml
 

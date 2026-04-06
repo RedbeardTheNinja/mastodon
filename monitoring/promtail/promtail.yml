@@ -12,6 +12,7 @@ scrape_configs:
   - job_name: mastodon_systemd
     journal:
       max_age: 168h
+      path: /var/log/journal
       labels:
         job: mastodon
         service: systemd
