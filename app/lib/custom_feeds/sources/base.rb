@@ -5,6 +5,9 @@ module CustomFeeds
     class Base
       include CustomFeeds::Registerable
 
+      # Maximum number of posts a pull source may fetch in a single run.
+      MAX_LIMIT_PER_RUN = 500
+
       # Returned by fetch_candidates.
       # max_remote_id — the highest ID seen in the raw API response (nil if none);
       #                 used to advance the cursor even when no statuses resolve.

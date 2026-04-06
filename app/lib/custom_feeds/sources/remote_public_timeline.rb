@@ -13,7 +13,7 @@ module CustomFeeds
 
       # options keys:
       #   sources (array, required) — [{domain:, local_only:}, ...]
-      #   limit_per_run (int, default 40, max 80)
+      #   limit_per_run (int, default 40, max MAX_LIMIT_PER_RUN)
       #
       # bucket = domain
 
@@ -25,7 +25,7 @@ module CustomFeeds
 
         domain = entry['domain'].to_s.strip
         local  = entry.fetch('local_only', true)
-        limit  = options.fetch('limit_per_run', 40).to_i.clamp(1, 80)
+        limit  = options.fetch('limit_per_run', 40).to_i.clamp(1, MAX_LIMIT_PER_RUN)
 
         return FetchResult.new(nil, []) if domain.blank?
 

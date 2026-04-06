@@ -13,7 +13,7 @@ module CustomFeeds
 
       # options keys:
       #   sources (array, required) — [{domain:, tag:}, ...]
-      #   limit_per_run (int, default 40, max 80)
+      #   limit_per_run (int, default 40, max MAX_LIMIT_PER_RUN)
       #
       # bucket format: "#{domain}:#{tag}"
       # fetch_candidates is called once per sources entry (per bucket).
@@ -26,7 +26,7 @@ module CustomFeeds
 
         domain = entry['domain'].to_s.strip
         tag    = entry['tag'].to_s.delete_prefix('#').strip
-        limit  = options.fetch('limit_per_run', 40).to_i.clamp(1, 80)
+        limit  = options.fetch('limit_per_run', 40).to_i.clamp(1, MAX_LIMIT_PER_RUN)
 
         return FetchResult.new(nil, []) if domain.blank? || tag.blank?
 

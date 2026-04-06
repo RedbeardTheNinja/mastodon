@@ -30,14 +30,19 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum by (feed_type) (rate(ruby_custom_feed_inserts_total[5m]))",
-          "legendFormat": "{{feed_type}}",
+          "expr": "rate(ruby_custom_feed_inserts_total{feed_type=\"standard\"}[5m])",
+          "legendFormat": "Standard feeds",
           "refId": "A"
         },
         {
-          "expr": "rate(ruby_sidekiq_jobs_total{job_name=\"FeedInsertWorker\"}[5m])",
-          "legendFormat": "home (baseline)",
+          "expr": "rate(ruby_custom_feed_inserts_total{feed_type=\"algorithmic\"}[5m])",
+          "legendFormat": "Algorithmic feeds",
           "refId": "B"
+        },
+        {
+          "expr": "rate(ruby_sidekiq_jobs_total{job_name=\"FeedInsertWorker\"}[5m])",
+          "legendFormat": "Home feed (baseline)",
+          "refId": "C"
         }
       ]
     },
@@ -45,7 +50,7 @@
     {
       "id": 3,
       "title": "Algorithmic candidate outcomes",
-      "description": "What happens to each candidate dequeued by AlgorithmicFeedWorker. 'promoted' = reached the user's feed; 'filtered_*' = dropped at various gates.",
+      "description": "What happens to each candidate dequeued by AlgorithmicFeedWorker. 'Promoted' = reached the user's feed; others = dropped at various gates.",
       "type": "timeseries",
       "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
       "datasource": "Prometheus",
@@ -63,9 +68,24 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum by (result) (rate(ruby_custom_feed_algo_candidates_total[5m]))",
-          "legendFormat": "{{result}}",
+          "expr": "rate(ruby_custom_feed_algo_candidates_total{result=\"promoted\"}[5m])",
+          "legendFormat": "Promoted to feed",
           "refId": "A"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_algo_candidates_total{result=\"filtered_pipeline\"}[5m])",
+          "legendFormat": "Filtered by pipeline",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_algo_candidates_total{result=\"filtered_score\"}[5m])",
+          "legendFormat": "Filtered by score",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_algo_candidates_total{result=\"filtered_min_signals\"}[5m])",
+          "legendFormat": "Filtered — not enough signals yet",
+          "refId": "D"
         }
       ]
     },
@@ -80,8 +100,8 @@
 
     {
       "id": 4,
-      "title": "Sidekiq job duration p95  (custom feed workers vs home)",
-      "description": "p95 execution time per job class.  The delta between CustomFeeds::FeedInsertWorker and FeedInsertWorker is the marginal cost per status pushed to a custom feed.",
+      "title": "Sidekiq job duration p99  (custom feed workers vs home)",
+      "description": "p99 execution time per job class.  The delta between the custom feed workers and FeedInsertWorker is the marginal cost per status pushed to a custom feed.",
       "type": "timeseries",
       "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
       "datasource": "Prometheus",
@@ -92,14 +112,34 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "ruby_sidekiq_job_duration_seconds{job_name=~\"(CustomFeeds::|Recommendations::).*\",quantile=\"0.99\"}",
-          "legendFormat": "{{job_name}}",
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"CustomFeeds::FeedInsertWorker\",quantile=\"0.99\"}",
+          "legendFormat": "Feed Insert",
           "refId": "A"
         },
         {
-          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"FeedInsertWorker\",quantile=\"0.99\"}",
-          "legendFormat": "FeedInsertWorker (home baseline)",
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"CustomFeeds::PullSourceIngestWorker\",quantile=\"0.99\"}",
+          "legendFormat": "Pull Source Ingest",
           "refId": "B"
+        },
+        {
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"CustomFeeds::TimeBasedRemovalWorker\",quantile=\"0.99\"}",
+          "legendFormat": "Time-based Removal",
+          "refId": "C"
+        },
+        {
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"CustomFeeds::StatsCollectorWorker\",quantile=\"0.99\"}",
+          "legendFormat": "Stats Collector",
+          "refId": "D"
+        },
+        {
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"Recommendations::AlgorithmicFeedWorker\",quantile=\"0.99\"}",
+          "legendFormat": "Algorithmic Feed",
+          "refId": "E"
+        },
+        {
+          "expr": "ruby_sidekiq_job_duration_seconds{job_name=\"FeedInsertWorker\",quantile=\"0.99\"}",
+          "legendFormat": "Home Feed Insert (baseline)",
+          "refId": "F"
         }
       ]
     },
@@ -118,9 +158,24 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "ruby_sidekiq_queue_latency_seconds{queue=~\"push|pull|default|scheduler\"}",
-          "legendFormat": "{{name}}",
+          "expr": "ruby_sidekiq_queue_latency_seconds{queue=\"push\"}",
+          "legendFormat": "Push queue",
           "refId": "A"
+        },
+        {
+          "expr": "ruby_sidekiq_queue_latency_seconds{queue=\"pull\"}",
+          "legendFormat": "Pull queue",
+          "refId": "B"
+        },
+        {
+          "expr": "ruby_sidekiq_queue_latency_seconds{queue=\"default\"}",
+          "legendFormat": "Default queue",
+          "refId": "C"
+        },
+        {
+          "expr": "ruby_sidekiq_queue_latency_seconds{queue=\"scheduler\"}",
+          "legendFormat": "Scheduler queue",
+          "refId": "D"
         }
       ]
     },
@@ -147,9 +202,19 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "ruby_custom_feed_redis_memory_bytes",
-          "legendFormat": "{{feed_type}}",
+          "expr": "ruby_custom_feed_redis_memory_bytes{feed_type=\"home\"}",
+          "legendFormat": "Home feeds",
           "refId": "A"
+        },
+        {
+          "expr": "ruby_custom_feed_redis_memory_bytes{feed_type=\"standard\"}",
+          "legendFormat": "Standard custom feeds",
+          "refId": "B"
+        },
+        {
+          "expr": "ruby_custom_feed_redis_memory_bytes{feed_type=\"algorithmic_pending\"}",
+          "legendFormat": "Algorithmic pending queue",
+          "refId": "C"
         }
       ]
     },
@@ -168,9 +233,19 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "ruby_custom_feed_redis_feed_count",
-          "legendFormat": "{{feed_type}}",
+          "expr": "ruby_custom_feed_redis_feed_count{feed_type=\"home\"}",
+          "legendFormat": "Home feeds",
           "refId": "A"
+        },
+        {
+          "expr": "ruby_custom_feed_redis_feed_count{feed_type=\"standard\"}",
+          "legendFormat": "Standard custom feeds",
+          "refId": "B"
+        },
+        {
+          "expr": "ruby_custom_feed_redis_feed_count{feed_type=\"algorithmic_pending\"}",
+          "legendFormat": "Algorithmic pending queue",
+          "refId": "C"
         }
       ]
     },
@@ -197,9 +272,24 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "ruby_custom_feed_pg_table_bytes",
-          "legendFormat": "{{table_name}}",
+          "expr": "ruby_custom_feed_pg_table_bytes{table_name=\"custom_feed_configs\"}",
+          "legendFormat": "Feed configs",
           "refId": "A"
+        },
+        {
+          "expr": "ruby_custom_feed_pg_table_bytes{table_name=\"custom_feed_steps\"}",
+          "legendFormat": "Feed steps",
+          "refId": "B"
+        },
+        {
+          "expr": "ruby_custom_feed_pg_table_bytes{table_name=\"custom_feed_pull_cursors\"}",
+          "legendFormat": "Pull cursors",
+          "refId": "C"
+        },
+        {
+          "expr": "ruby_custom_feed_pg_table_bytes{table_name=\"recommendation_signals\"}",
+          "legendFormat": "Recommendation signals",
+          "refId": "D"
         }
       ]
     },
@@ -218,9 +308,19 @@
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "sum by (signal_type) (rate(ruby_recommendation_signal_records_total[5m])) * 3600",
-          "legendFormat": "{{signal_type}}",
+          "expr": "sum(rate(ruby_recommendation_signal_records_total{signal_type=\"tag\"}[5m])) * 3600",
+          "legendFormat": "Tag affinity",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(ruby_recommendation_signal_records_total{signal_type=\"account\"}[5m])) * 3600",
+          "legendFormat": "Account affinity",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(ruby_recommendation_signal_records_total{signal_type=\"domain\"}[5m])) * 3600",
+          "legendFormat": "Domain affinity",
+          "refId": "C"
         }
       ]
     },
@@ -274,12 +374,12 @@
       "targets": [
         {
           "expr": "redis_memory_used_bytes",
-          "legendFormat": "Redis RSS",
+          "legendFormat": "Total Redis memory",
           "refId": "A"
         },
         {
           "expr": "redis_memory_used_bytes - sum(ruby_custom_feed_redis_memory_bytes)",
-          "legendFormat": "Redis (non-feed)",
+          "legendFormat": "Non-feed memory",
           "refId": "B"
         }
       ]
