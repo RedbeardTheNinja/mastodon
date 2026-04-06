@@ -3,14 +3,11 @@ import { useCallback } from 'react';
 import { defineMessages, useIntl, FormattedMessage } from 'react-intl';
 
 import DeleteIcon from '@/material-icons/400-24px/delete.svg?react';
-
 import { Icon } from 'mastodon/components/icon';
 
+import { ServerDomainInput } from '../server_domain_input';
+
 const messages = defineMessages({
-  domainPlaceholder: {
-    id: 'custom_feeds.step_options.domain_placeholder',
-    defaultMessage: 'e.g. mastodon.social',
-  },
   removeServer: {
     id: 'custom_feeds.step_options.remove_server',
     defaultMessage: 'Remove server',
@@ -35,27 +32,38 @@ interface RowProps {
   onRemove: (index: number) => void;
 }
 
-const SourceRow: React.FC<RowProps> = ({ entry, index, showRemove, onDomainChange, onLocalOnlyChange, onRemove }) => {
+const SourceRow: React.FC<RowProps> = ({
+  entry,
+  index,
+  showRemove,
+  onDomainChange,
+  onLocalOnlyChange,
+  onRemove,
+}) => {
   const intl = useIntl();
 
   const handleDomain = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => { onDomainChange(index, e.target.value); },
+    (value: string) => {
+      onDomainChange(index, value);
+    },
     [onDomainChange, index],
   );
   const handleLocalOnly = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => { onLocalOnlyChange(index, e.target.checked); },
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      onLocalOnlyChange(index, e.target.checked);
+    },
     [onLocalOnlyChange, index],
   );
-  const handleRemove = useCallback(() => { onRemove(index); }, [onRemove, index]);
+  const handleRemove = useCallback(() => {
+    onRemove(index);
+  }, [onRemove, index]);
 
   return (
-    <div className='step-options__row'>
-      <input
-        type='text'
-        className='step-options__input'
-        placeholder={intl.formatMessage(messages.domainPlaceholder)}
+    <div className='step-options__source-row'>
+      <ServerDomainInput
         value={entry.domain}
         onChange={handleDomain}
+        warnNonPublic
       />
       <label className='step-options__local-toggle'>
         <input
@@ -85,31 +93,46 @@ interface Props {
   onChange: (options: Record<string, unknown>) => void;
 }
 
-export const RemotePublicTimelineOptions: React.FC<Props> = ({ options, onChange }) => {
-  const sources = (options.sources as SourceEntry[] | undefined) ?? [{ domain: '', local_only: true }];
+export const RemotePublicTimelineOptions: React.FC<Props> = ({
+  options,
+  onChange,
+}) => {
+  const sources = (options.sources as SourceEntry[] | undefined) ?? [
+    { domain: '', local_only: true },
+  ];
   const limitPerRun = (options.limit_per_run as number | undefined) ?? 40;
 
   const updateSources = useCallback(
-    (next: SourceEntry[]) => { onChange({ ...options, sources: next }); },
+    (next: SourceEntry[]) => {
+      onChange({ ...options, sources: next });
+    },
     [options, onChange],
   );
 
   const handleDomainChange = useCallback(
     (index: number, value: string) => {
-      updateSources(sources.map((s, i) => (i === index ? { ...s, domain: value } : s)));
+      updateSources(
+        sources.map((s, i) => (i === index ? { ...s, domain: value } : s)),
+      );
     },
     [sources, updateSources],
   );
 
   const handleLocalOnlyChange = useCallback(
     (index: number, checked: boolean) => {
-      updateSources(sources.map((s, i) => (i === index ? { ...s, local_only: checked } : s)));
+      updateSources(
+        sources.map((s, i) =>
+          i === index ? { ...s, local_only: checked } : s,
+        ),
+      );
     },
     [sources, updateSources],
   );
 
   const handleRemoveRow = useCallback(
-    (index: number) => { updateSources(sources.filter((_, i) => i !== index)); },
+    (index: number) => {
+      updateSources(sources.filter((_, i) => i !== index));
+    },
     [sources, updateSources],
   );
 
@@ -119,7 +142,10 @@ export const RemotePublicTimelineOptions: React.FC<Props> = ({ options, onChange
 
   const handleLimitChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      onChange({ ...options, limit_per_run: parseInt(e.target.value, 10) || 40 });
+      onChange({
+        ...options,
+        limit_per_run: parseInt(e.target.value, 10) || 40,
+      });
     },
     [options, onChange],
   );
@@ -127,7 +153,10 @@ export const RemotePublicTimelineOptions: React.FC<Props> = ({ options, onChange
   return (
     <div className='step-options'>
       <div className='step-options__label'>
-        <FormattedMessage id='custom_feeds.step_options.sources_label' defaultMessage='Servers to follow' />
+        <FormattedMessage
+          id='custom_feeds.step_options.sources_label'
+          defaultMessage='Servers to follow'
+        />
       </div>
 
       {sources.map((entry, index) => (
@@ -142,20 +171,30 @@ export const RemotePublicTimelineOptions: React.FC<Props> = ({ options, onChange
         />
       ))}
 
-      <button type='button' className='step-options__add-btn' onClick={handleAddRow}>
-        <FormattedMessage id='custom_feeds.step_options.add_server' defaultMessage='Add server' />
+      <button
+        type='button'
+        className='step-options__add-btn'
+        onClick={handleAddRow}
+      >
+        <FormattedMessage
+          id='custom_feeds.step_options.add_server'
+          defaultMessage='Add server'
+        />
       </button>
 
       <div className='step-options__field'>
         <label htmlFor='cf-public-limit'>
-          <FormattedMessage id='custom_feeds.step_options.limit_per_run' defaultMessage='Posts fetched per run' />
+          <FormattedMessage
+            id='custom_feeds.step_options.limit_per_run'
+            defaultMessage='Posts fetched per run'
+          />
         </label>
         <input
           id='cf-public-limit'
           type='number'
           className='step-options__number'
           min={1}
-          max={80}
+          max={500}
           value={limitPerRun}
           onChange={handleLimitChange}
         />

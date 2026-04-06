@@ -34,7 +34,7 @@ module CustomFeeds
         params = { limit: limit }
         params[:since_id] = since_id if since_id.present?
 
-        response = HTTP.timeout(10).get(url, params: params)
+        response = HTTP.timeout(20).get(url, params: params)
         return FetchResult.new(nil, []) unless response.status.success?
 
         raw      = JSON.parse(response.body)
