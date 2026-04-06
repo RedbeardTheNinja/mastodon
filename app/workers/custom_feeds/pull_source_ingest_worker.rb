@@ -8,7 +8,7 @@ module CustomFeeds
     include Sidekiq::Worker
     include DatabaseHelper
 
-    sidekiq_options queue: 'pull', retry: 3
+    sidekiq_options queue: 'pull', retry: 3, lock: :until_executed, lock_ttl: 30.minutes.to_i
 
     def perform(config_id)
       config = CustomFeedConfig.find_by(id: config_id)
