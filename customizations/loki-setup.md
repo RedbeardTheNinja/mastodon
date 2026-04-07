@@ -1,14 +1,47 @@
-# Grafana Log Search Setup (Loki + Promtail)
+# Grafana Log Search Setup (Promtail on server → Loki local)
 
-Loki and Promtail have been added to the monitoring docker-compose. This document covers what needs to be done **on the server** to enable log search in Grafana.
+Grafana, Loki, Prometheus, and Pushgateway all run **locally** on your dev machine.
+Promtail runs **on the server** and pushes logs to your local Loki over the network.
 
 Logs are retained for **7 days**.
 
 ---
 
-## 1. Find where Mastodon writes logs
+## Architecture
 
-Mastodon can log to files or to the systemd journal depending on how it is configured. Run both checks:
+```
+Server                        Local machine
+──────────────────────        ──────────────────────
+Mastodon (journald/files)
+  └─ Promtail  ──────────────────────→  Loki :3100
+                                         └─ Grafana :3001
+```
+
+---
+
+## 1. Make local Loki reachable from the server
+
+Loki listens on port **3100** on your local machine. The server needs to be able to reach it.
+
+Find your local machine's IP that the server can route to:
+
+```bash
+# On your local machine
+ipconfig   # look for your LAN or VPN IP
+```
+
+Ensure port 3100 is not blocked by your local firewall. On Windows Defender Firewall, add an inbound rule for TCP 3100 if needed.
+
+Test reachability from the server:
+
+```bash
+curl http://<your-local-ip>:3100/ready
+# Should return: ready
+```
+
+---
+
+## 2. Find where Mastodon writes logs on the server
 
 ```bash
 # Check for log files
@@ -18,129 +51,146 @@ ls -lh /home/mastodon/live/log/
 journalctl -u mastodon-web --no-pager -n 5
 ```
 
-**If logs go to journald** (lines appear in the `journalctl` output), the promtail `journal` scrape will pick them up automatically — skip to step 2.
+---
 
-**If logs go to files** (e.g. `/home/mastodon/live/log/production.log`), update `monitoring/promtail/promtail.yml` with the correct paths before deploying:
+## 3. Install Promtail on the server
+
+Download the same version used locally (3.1.0):
+
+```bash
+curl -Lo /tmp/promtail.zip \
+  https://github.com/grafana/loki/releases/download/v3.1.0/promtail-linux-amd64.zip
+cd /tmp && unzip promtail.zip
+sudo mv promtail-linux-amd64 /usr/local/bin/promtail
+sudo chmod +x /usr/local/bin/promtail
+```
+
+Or run it as a Docker container — see step 5 for the Docker variant.
+
+---
+
+## 4. Create the Promtail config on the server
+
+Create `/etc/promtail/promtail.yml` — choose the block that matches how Mastodon logs on your server.
+
+**If logs go to the systemd journal:**
 
 ```yaml
-- job_name: mastodon_rails
-  static_configs:
-    - targets:
-        - localhost
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://<your-local-ip>:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: mastodon_systemd
+    journal:
+      max_age: 168h
       labels:
         job: mastodon
-        service: rails
-        __path__: /home/mastodon/live/log/production.log # ← update this
-
-- job_name: mastodon_sidekiq
-  static_configs:
-    - targets:
-        - localhost
-      labels:
-        job: mastodon
-        service: sidekiq
-        __path__: /home/mastodon/live/log/sidekiq.log # ← update this
+        service: systemd
+    relabel_configs:
+      - source_labels: [__journal__systemd_unit]
+        target_label: unit
+      - source_labels: [__journal__systemd_unit]
+        regex: mastodon-.+\.service
+        action: keep
 ```
 
-Also update the `volumes` mount in `docker-compose.yml` to point at the correct directory:
+**If logs go to files** (e.g. `/home/mastodon/live/log/`):
 
 ```yaml
-promtail:
-  volumes:
-    - /home/mastodon/live/log:/var/log/mastodon:ro # ← adjust source path
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://<your-local-ip>:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: mastodon_rails
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: mastodon
+          service: rails
+          __path__: /home/mastodon/live/log/production.log
+
+  - job_name: mastodon_sidekiq
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: mastodon
+          service: sidekiq
+          __path__: /home/mastodon/live/log/sidekiq.log
 ```
+
+Replace `<your-local-ip>` with your actual IP from step 1.
 
 ---
 
-## 2. Check systemd unit names
+## 5. Run Promtail
 
-The promtail config filters the journal for units matching `mastodon-*.service`. Verify yours match:
+**As a systemd service (recommended):**
+
+Create `/etc/systemd/system/promtail.service`:
+
+```ini
+[Unit]
+Description=Promtail log shipper
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/promtail -config.file=/etc/promtail/promtail.yml
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-systemctl list-units 'mastodon*' --no-pager
+sudo systemctl daemon-reload
+sudo systemctl enable --now promtail
+sudo systemctl status promtail
 ```
 
-Common names are `mastodon-web.service`, `mastodon-sidekiq.service`, `mastodon-streaming.service`. If yours differ, update the `regex` in `promtail/promtail.yml`:
+**As Docker (journal access requires host networking):**
 
-```yaml
-- source_labels: [__journal__systemd_unit]
-  regex: mastodon-.+\.service # ← adjust if your unit names differ
-  action: keep
+```bash
+docker run -d \
+  --name promtail \
+  --restart unless-stopped \
+  --network host \
+  -v /etc/promtail:/etc/promtail:ro \
+  -v /var/log/journal:/var/log/journal:ro \
+  -v /etc/machine-id:/etc/machine-id:ro \
+  grafana/promtail:3.1.0 \
+  -config.file=/etc/promtail/promtail.yml
 ```
+
+Use `--network host` so it can reach your local machine via the LAN IP and read the journal socket.
 
 ---
 
-## 3. Give the promtail container access to the journal
+## 6. Verify logs appear in Grafana
 
-The promtail container needs read access to the systemd journal socket. The docker-compose already mounts:
-
-```yaml
-- /run/log/journal:/run/log/journal:ro
-- /etc/machine-id:/etc/machine-id:ro
-```
-
-Verify the journal directory exists on your server:
-
-```bash
-ls /run/log/journal/
-```
-
-If it is empty or missing, your system may use `/var/log/journal/` (persistent journal). Add that mount instead:
-
-```yaml
-- /var/log/journal:/var/log/journal:ro
-```
-
----
-
-## 4. Pull the latest code and restart the stack
-
-```bash
-cd /path/to/monitoring   # wherever docker-compose.yml lives
-git pull
-docker compose up -d
-```
-
-Check that Loki and Promtail started cleanly:
-
-```bash
-docker compose logs loki --tail=20
-docker compose logs promtail --tail=20
-```
-
-Promtail should log lines like:
-
-```
-level=info msg="Tailing new file" path=/var/log/mastodon/production.log
-```
-
-or for journald:
-
-```
-level=info msg="Journal successfully opened"
-```
-
----
-
-## 5. Verify in Grafana
-
-1. Open Grafana → **Explore**
-2. Switch the datasource to **Loki**
-3. Run a test query:
+1. Open Grafana → **Explore** → switch datasource to **Loki**
+2. Run:
 
 ```logql
-{job="mastodon"} | line_format "{{.message}}"
+{job="mastodon"}
 ```
 
-To search for specific errors:
-
-```logql
-{job="mastodon"} |= "ERROR"
-{job="mastodon", service="sidekiq"} |= "SignalWorker"
-{job="mastodon"} |= "CustomFeeds" |= "failed"
-```
-
-To filter to a time range, use the Grafana time picker in the top right.
+You should see log lines within a few seconds of Promtail starting.
 
 ---
 

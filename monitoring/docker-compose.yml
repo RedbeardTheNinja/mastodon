@@ -50,16 +50,6 @@ services:
       - loki_data:/loki
     command: -config.file=/etc/loki/loki.yml
 
-  promtail:
-    image: grafana/promtail:3.1.0
-    container_name: monitoring_promtail
-    restart: unless-stopped
-    volumes:
-      - ./promtail:/etc/promtail:ro
-      - /var/log/journal:/var/log/journal:ro
-      - /etc/machine-id:/etc/machine-id:ro
-    command: -config.file=/etc/promtail/promtail.yml
-
 volumes:
   prometheus_data:
   grafana_data:
