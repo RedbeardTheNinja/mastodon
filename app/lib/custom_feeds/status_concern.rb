@@ -22,10 +22,10 @@ module CustomFeeds
 
       if reblog?
         CustomFeeds::FeedRemoveWorker.perform_async(reblog_of_id, account_id, 'reblog')
-        Recommendations::SignalWorker.perform_async('reblog', reblog_of_id, account_id)
+        ::Recommendations::SignalWorker.perform_async('reblog', reblog_of_id, account_id)
       elsif reply?
         CustomFeeds::FeedRemoveWorker.perform_async(in_reply_to_id, account_id, 'reply')
-        Recommendations::SignalWorker.perform_async('reply', in_reply_to_id, account_id)
+        ::Recommendations::SignalWorker.perform_async('reply', in_reply_to_id, account_id)
       end
     end
   end

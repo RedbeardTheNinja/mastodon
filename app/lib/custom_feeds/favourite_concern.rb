@@ -17,7 +17,7 @@ module CustomFeeds
     end
 
     def enqueue_recommendation_signal
-      Recommendations::SignalWorker.perform_async('favourite', status_id, account_id)
+      ::Recommendations::SignalWorker.perform_async('favourite', status_id, account_id)
     end
   end
 end
