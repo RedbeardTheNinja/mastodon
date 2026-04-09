@@ -23,9 +23,13 @@ const messages = defineMessages({
 });
 
 export interface StepDraft {
+  key: string;
   step_type: string;
   options: Record<string, unknown>;
 }
+
+// Step types that may be added more than once per phase.
+const MULTI_INSTANCE_STEP_TYPES = new Set(['remote_tag_timeline']);
 
 export interface StepOption {
   value: string;
@@ -40,8 +44,8 @@ interface Props {
   /** If set, hide the add dropdown once this many steps are present. */
   maxSteps?: number;
   onAdd: (stepType: string) => void;
-  onRemove: (stepType: string) => void;
-  onOptionsChange: (stepType: string, options: Record<string, unknown>) => void;
+  onRemove: (key: string) => void;
+  onOptionsChange: (key: string, options: Record<string, unknown>) => void;
 }
 
 const StepOptionsForm = ({
@@ -95,8 +99,8 @@ const StepOptionsForm = ({
 interface StepRowProps {
   draft: StepDraft;
   label: MessageDescriptor | undefined;
-  onRemove: (stepType: string) => void;
-  onOptionsChange: (stepType: string, options: Record<string, unknown>) => void;
+  onRemove: (key: string) => void;
+  onOptionsChange: (key: string, options: Record<string, unknown>) => void;
 }
 
 const StepRow: React.FC<StepRowProps> = ({
@@ -108,14 +112,14 @@ const StepRow: React.FC<StepRowProps> = ({
   const intl = useIntl();
 
   const handleRemove = useCallback(() => {
-    onRemove(draft.step_type);
-  }, [onRemove, draft.step_type]);
+    onRemove(draft.key);
+  }, [onRemove, draft.key]);
 
   const handleOptionsChange = useCallback(
     (opts: Record<string, unknown>) => {
-      onOptionsChange(draft.step_type, opts);
+      onOptionsChange(draft.key, opts);
     },
-    [onOptionsChange, draft.step_type],
+    [onOptionsChange, draft.key],
   );
 
   return (
@@ -159,7 +163,10 @@ export const PhaseSection: React.FC<Props> = ({
   const atMax = maxSteps !== undefined && drafts.length >= maxSteps;
   const remaining = atMax
     ? []
-    : availableOptions.filter((o) => !addedTypes.has(o.value));
+    : availableOptions.filter(
+        (o) =>
+          !addedTypes.has(o.value) || MULTI_INSTANCE_STEP_TYPES.has(o.value),
+      );
 
   const handleAddChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -184,7 +191,7 @@ export const PhaseSection: React.FC<Props> = ({
 
       {drafts.map((draft) => (
         <StepRow
-          key={draft.step_type}
+          key={draft.key}
           draft={draft}
           label={labelFor(draft.step_type)}
           onRemove={onRemove}

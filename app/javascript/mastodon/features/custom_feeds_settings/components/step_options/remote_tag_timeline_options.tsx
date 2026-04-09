@@ -12,63 +12,108 @@ const messages = defineMessages({
     id: 'custom_feeds.step_options.tag_placeholder',
     defaultMessage: 'e.g. rustlang',
   },
+  removeTag: {
+    id: 'custom_feeds.step_options.remove_tag',
+    defaultMessage: 'Remove tag',
+  },
   removeServer: {
     id: 'custom_feeds.step_options.remove_server',
     defaultMessage: 'Remove server',
   },
 });
 
-interface SourceEntry {
-  domain: string;
-  tag: string;
-}
+// ---------------------------------------------------------------------------
+// Tag row
+// ---------------------------------------------------------------------------
 
-interface RowProps {
-  entry: SourceEntry;
+interface TagRowProps {
+  value: string;
   index: number;
   showRemove: boolean;
-  onDomainChange: (index: number, value: string) => void;
-  onTagChange: (index: number, value: string) => void;
+  onChange: (index: number, value: string) => void;
   onRemove: (index: number) => void;
 }
 
-const SourceRow: React.FC<RowProps> = ({
-  entry,
+const TagRow: React.FC<TagRowProps> = ({
+  value,
   index,
   showRemove,
-  onDomainChange,
-  onTagChange,
+  onChange,
   onRemove,
 }) => {
   const intl = useIntl();
 
-  const handleDomain = useCallback(
-    (value: string) => {
-      onDomainChange(index, value);
-    },
-    [onDomainChange, index],
-  );
-  const handleTag = useCallback(
+  const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      onTagChange(index, e.target.value);
+      onChange(index, e.target.value.replace(/^#/, ''));
     },
-    [onTagChange, index],
+    [onChange, index],
   );
+
   const handleRemove = useCallback(() => {
     onRemove(index);
   }, [onRemove, index]);
 
   return (
     <div className='step-options__source-row'>
-      <ServerDomainInput value={entry.domain} onChange={handleDomain} />
       <span className='step-options__sep'>#</span>
       <input
         type='text'
         className='step-options__input'
         placeholder={intl.formatMessage(messages.tagPlaceholder)}
-        value={entry.tag}
-        onChange={handleTag}
+        value={value}
+        onChange={handleChange}
       />
+      {showRemove && (
+        <button
+          type='button'
+          className='icon-button icon-button--destructive'
+          title={intl.formatMessage(messages.removeTag)}
+          aria-label={intl.formatMessage(messages.removeTag)}
+          onClick={handleRemove}
+        >
+          <Icon id='delete' icon={DeleteIcon} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Domain row
+// ---------------------------------------------------------------------------
+
+interface DomainRowProps {
+  value: string;
+  index: number;
+  showRemove: boolean;
+  onChange: (index: number, value: string) => void;
+  onRemove: (index: number) => void;
+}
+
+const DomainRow: React.FC<DomainRowProps> = ({
+  value,
+  index,
+  showRemove,
+  onChange,
+  onRemove,
+}) => {
+  const intl = useIntl();
+
+  const handleChange = useCallback(
+    (v: string) => {
+      onChange(index, v);
+    },
+    [onChange, index],
+  );
+
+  const handleRemove = useCallback(() => {
+    onRemove(index);
+  }, [onRemove, index]);
+
+  return (
+    <div className='step-options__source-row'>
+      <ServerDomainInput value={value} onChange={handleChange} />
       {showRemove && (
         <button
           type='button'
@@ -84,6 +129,10 @@ const SourceRow: React.FC<RowProps> = ({
   );
 };
 
+// ---------------------------------------------------------------------------
+// Main options component
+// ---------------------------------------------------------------------------
+
 interface Props {
   options: Record<string, unknown>;
   onChange: (options: Record<string, unknown>) => void;
@@ -93,48 +142,54 @@ export const RemoteTagTimelineOptions: React.FC<Props> = ({
   options,
   onChange,
 }) => {
-  const sources = (options.sources as SourceEntry[] | undefined) ?? [
-    { domain: '', tag: '' },
-  ];
+  const tags = (options.tags as string[] | undefined) ?? [''];
+  const domains = (options.domains as string[] | undefined) ?? [''];
   const limitPerRun = (options.limit_per_run as number | undefined) ?? 40;
 
-  const updateSources = useCallback(
-    (next: SourceEntry[]) => {
-      onChange({ ...options, sources: next });
+  const handleTagChange = useCallback(
+    (index: number, value: string) => {
+      onChange({
+        ...options,
+        tags: tags.map((t, i) => (i === index ? value : t)),
+      });
     },
-    [options, onChange],
+    [options, onChange, tags],
+  );
+
+  const handleAddTag = useCallback(() => {
+    onChange({ ...options, tags: [...tags, ''] });
+  }, [options, onChange, tags]);
+
+  const handleRemoveTag = useCallback(
+    (index: number) => {
+      onChange({ ...options, tags: tags.filter((_, i) => i !== index) });
+    },
+    [options, onChange, tags],
   );
 
   const handleDomainChange = useCallback(
     (index: number, value: string) => {
-      updateSources(
-        sources.map((s, i) => (i === index ? { ...s, domain: value } : s)),
-      );
+      onChange({
+        ...options,
+        domains: domains.map((d, i) => (i === index ? value : d)),
+      });
     },
-    [sources, updateSources],
+    [options, onChange, domains],
   );
 
-  const handleTagChange = useCallback(
-    (index: number, value: string) => {
-      updateSources(
-        sources.map((s, i) =>
-          i === index ? { ...s, tag: value.replace(/^#/, '') } : s,
-        ),
-      );
-    },
-    [sources, updateSources],
-  );
+  const handleAddDomain = useCallback(() => {
+    onChange({ ...options, domains: [...domains, ''] });
+  }, [options, onChange, domains]);
 
-  const handleRemoveRow = useCallback(
+  const handleRemoveDomain = useCallback(
     (index: number) => {
-      updateSources(sources.filter((_, i) => i !== index));
+      onChange({
+        ...options,
+        domains: domains.filter((_, i) => i !== index),
+      });
     },
-    [sources, updateSources],
+    [options, onChange, domains],
   );
-
-  const handleAddRow = useCallback(() => {
-    updateSources([...sources, { domain: '', tag: '' }]);
-  }, [sources, updateSources]);
 
   const handleLimitChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -150,27 +205,55 @@ export const RemoteTagTimelineOptions: React.FC<Props> = ({
     <div className='step-options'>
       <div className='step-options__label'>
         <FormattedMessage
-          id='custom_feeds.step_options.sources_label'
-          defaultMessage='Servers to follow'
+          id='custom_feeds.step_options.tags_label'
+          defaultMessage='Tags to follow'
         />
       </div>
 
-      {sources.map((entry, index) => (
-        <SourceRow
+      {tags.map((tag, index) => (
+        <TagRow
           key={index}
-          entry={entry}
+          value={tag}
           index={index}
-          showRemove={sources.length > 1}
-          onDomainChange={handleDomainChange}
-          onTagChange={handleTagChange}
-          onRemove={handleRemoveRow}
+          showRemove={tags.length > 1}
+          onChange={handleTagChange}
+          onRemove={handleRemoveTag}
         />
       ))}
 
       <button
         type='button'
         className='step-options__add-btn'
-        onClick={handleAddRow}
+        onClick={handleAddTag}
+      >
+        <FormattedMessage
+          id='custom_feeds.step_options.add_tag'
+          defaultMessage='Add tag'
+        />
+      </button>
+
+      <div className='step-options__label'>
+        <FormattedMessage
+          id='custom_feeds.step_options.servers_label'
+          defaultMessage='Servers to fetch from'
+        />
+      </div>
+
+      {domains.map((domain, index) => (
+        <DomainRow
+          key={index}
+          value={domain}
+          index={index}
+          showRemove={domains.length > 1}
+          onChange={handleDomainChange}
+          onRemove={handleRemoveDomain}
+        />
+      ))}
+
+      <button
+        type='button'
+        className='step-options__add-btn'
+        onClick={handleAddDomain}
       >
         <FormattedMessage
           id='custom_feeds.step_options.add_server'

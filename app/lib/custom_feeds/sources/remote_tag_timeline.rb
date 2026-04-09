@@ -12,20 +12,17 @@ module CustomFeeds
       end
 
       # options keys:
-      #   sources (array, required) — [{domain:, tag:}, ...]
+      #   tags    (array, required) — list of hashtags (with or without leading #)
+      #   domains (array, required) — list of remote instance domains
       #   limit_per_run (int, default 40, max MAX_LIMIT_PER_RUN)
       #
       # bucket format: "#{domain}:#{tag}"
-      # fetch_candidates is called once per sources entry (per bucket).
+      # fetch_candidates is called once per bucket (cross-product of domains × tags).
 
       def fetch_candidates(_account, options = {}, since_id: nil, bucket: '')
-        sources = Array(options['sources'])
-        entry   = sources.find { |s| "#{s['domain']}:#{s['tag'].to_s.delete_prefix('#')}" == bucket } ||
-                  sources.first
-        return FetchResult.new(nil, []) unless entry
-
-        domain = entry['domain'].to_s.strip
-        tag    = entry['tag'].to_s.delete_prefix('#').strip
+        domain, tag = bucket.split(':', 2)
+        domain = domain.to_s.strip
+        tag    = tag.to_s.strip
         limit  = options.fetch('limit_per_run', 40).to_i.clamp(1, MAX_LIMIT_PER_RUN)
 
         return FetchResult.new(nil, []) if domain.blank? || tag.blank?
@@ -48,13 +45,10 @@ module CustomFeeds
       end
 
       def self.buckets_for(options)
-        Array(options['sources']).filter_map do |s|
-          domain = s['domain'].to_s.strip
-          tag    = s['tag'].to_s.delete_prefix('#').strip
-          next if domain.blank? || tag.blank?
+        tags    = Array(options['tags']).filter_map { |t| t.to_s.delete_prefix('#').strip.presence }
+        domains = Array(options['domains']).filter_map { |d| d.to_s.strip.presence }
 
-          "#{domain}:#{tag}"
-        end
+        domains.flat_map { |domain| tags.map { |tag| "#{domain}:#{tag}" } }
       end
     end
   end

@@ -21,10 +21,8 @@ namespace :custom_feeds do
     )
     source_step.position = 0
     source_step.options = {
-      'sources' => [
-        { 'domain' => 'mastodon.social', 'tag' => 'nsfw' },
-        { 'domain' => 'mastodon.art', 'tag' => 'nsfw' },
-      ],
+      'tags' => ['nsfw'],
+      'domains' => ['mastodon.social', 'mastodon.art'],
       'limit_per_run' => 40,
     }
     source_step.save!

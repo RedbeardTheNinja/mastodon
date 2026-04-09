@@ -265,7 +265,8 @@ const PHASE_OPTIONS: Record<CustomFeedPhase, StepOption[]> = {
 // Default options for step types that need pre-populated options.
 const DEFAULT_OPTIONS: Record<string, Record<string, unknown>> = {
   remote_tag_timeline: {
-    sources: [{ domain: '', tag: '' }],
+    tags: [''],
+    domains: [''],
     limit_per_run: 40,
   },
   remote_public_timeline: {
@@ -293,7 +294,7 @@ function stepsFor(
   return (config?.steps ?? [])
     .filter((s) => s.phase === phase)
     .sort((a, b) => a.position - b.position)
-    .map((s) => ({ step_type: s.step_type, options: s.options }));
+    .map((s) => ({ key: s.id, step_type: s.step_type, options: s.options }));
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +342,13 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
   const [filterDrafts, setFilterDrafts] = useState<StepDraft[]>(() =>
     config
       ? stepsFor(config, 'filter')
-      : [{ step_type: 'home_filters', options: {} }],
+      : [
+          {
+            key: 'home_filters_default',
+            step_type: 'home_filters',
+            options: {},
+          },
+        ],
   );
   const [algorithmDrafts, setAlgorithmDrafts] = useState<StepDraft[]>(() =>
     stepsFor(config, 'algorithm'),
@@ -361,9 +368,14 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
   const makeAdd = useCallback(
     (setter: React.Dispatch<React.SetStateAction<StepDraft[]>>) =>
       (stepType: string) => {
+        const key = `${stepType}_new_${Date.now()}`;
         setter((prev) => [
           ...prev,
-          { step_type: stepType, options: DEFAULT_OPTIONS[stepType] ?? {} },
+          {
+            key,
+            step_type: stepType,
+            options: DEFAULT_OPTIONS[stepType] ?? {},
+          },
         ]);
       },
     [],
@@ -371,17 +383,17 @@ export const CustomFeedForm: React.FC<Props> = ({ config, onClose }) => {
 
   const makeRemove = useCallback(
     (setter: React.Dispatch<React.SetStateAction<StepDraft[]>>) =>
-      (stepType: string) => {
-        setter((prev) => prev.filter((d) => d.step_type !== stepType));
+      (key: string) => {
+        setter((prev) => prev.filter((d) => d.key !== key));
       },
     [],
   );
 
   const makeOptionsChange = useCallback(
     (setter: React.Dispatch<React.SetStateAction<StepDraft[]>>) =>
-      (stepType: string, options: Record<string, unknown>) => {
+      (key: string, options: Record<string, unknown>) => {
         setter((prev) =>
-          prev.map((d) => (d.step_type === stepType ? { ...d, options } : d)),
+          prev.map((d) => (d.key === key ? { ...d, options } : d)),
         );
       },
     [],
