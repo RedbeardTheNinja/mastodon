@@ -1,39 +1,66 @@
-# Custom Feeds Monitoring
+# Monitoring
 
-Measures the performance impact of custom/algorithmic feeds vs. the home feed baseline.
-Provides CPU, memory, and disk metrics to support extrapolation of per-user scaling cost.
+Prometheus + Grafana stack measuring custom and algorithmic feed performance. Scrapes Rails, Sidekiq, Redis, and system metrics from the production server.
 
 ## Architecture
 
 ```
 antypdet-server (production)           antypdet-gaming (local Windows)
 ─────────────────────────────          ──────────────────────────────────────
-  Rails / Puma                           docker-compose -f monitoring/docker-compose.yml
+  Rails / Puma                           docker compose -f monitoring/docker-compose.yml up -d
   Sidekiq                    scrape ──►  Prometheus  :9090
-  prometheus_exporter :9394             Grafana     :3001  (login admin/admin)
-  node_exporter       :9100             Pushgateway :9091  (optional, ad-hoc use)
+  prometheus_exporter :9394             Grafana     :3001  (admin/admin)
+  node_exporter       :9100             Pushgateway :9091  (available for ad-hoc use)
   redis_exporter      :9121
   Mastodon streaming  :4000/metrics
 ```
 
-Prometheus on `antypdet-gaming` scrapes three endpoints on `antypdet-server` every 15 s.
-No metrics are pushed — Prometheus pulls. Hostname resolution depends on the two machines
-being on the same network (LAN or Tailscale).
+Prometheus on `antypdet-gaming` scrapes three endpoints on `antypdet-server` every 15 s via pull. Hostname resolution requires the two machines to be on the same network (LAN or Tailscale).
+
+---
+
+## Repo customizations that enable monitoring
+
+These files exist in this fork specifically to support the monitoring stack. They have no upstream equivalent.
+
+### `app/lib/custom_feeds/metrics.rb`
+
+Thin wrapper around `PrometheusExporter::Client`. All emit methods guard with `enabled?` and a bare `rescue` so metrics never raise into the main execution path. Used by `FeedInsertWorker`, `PullSourceIngestWorker`, `AlgorithmicFeedWorker`, `SignalWorker`, and `StatsCollectorWorker`.
+
+### `app/workers/custom_feeds/stats_collector_worker.rb`
+
+Sidekiq scheduler worker (queue: `scheduler`, every 5 min). Uses `SCAN` to find all `feed:custom:*` and `feed:algo:*:pending` keys, samples per-key memory via `DEBUG OBJECT`, queries PostgreSQL `pg_relation_size` for custom feed tables, and emits gauges via `CustomFeeds::Metrics`. Uses HSCAN-based iteration to avoid loading entire key sets into memory.
+
+### `lib/mastodon/prometheus_exporter/custom_feeds_collector.rb`
+
+`PrometheusExporter::Server::TypeCollector` implementation. Registered with the standalone `prometheus_exporter` process via `--type-collector`. Receives JSON metric payloads from Rails and Sidekiq processes (via `PrometheusExporter::Client`) and exposes them at `:9394/metrics`.
+
+### `lib/mastodon/prometheus_exporter/local_server.rb`
+
+Extended to support `register_collector` for dev/local mode, where the collector runs inside the Rails process rather than a separate server. Allows `MASTODON_PROMETHEUS_EXPORTER_LOCAL=true` to work in development without starting a standalone `prometheus_exporter` process.
+
+### `monitoring/` directory
+
+Docker Compose stack (`monitoring/docker-compose.yml`) running Prometheus, Grafana, and Pushgateway locally on `antypdet-gaming`. Grafana dashboards are auto-provisioned from `monitoring/grafana/dashboards/`. Prometheus scrape config is at `monitoring/prometheus/prometheus.yml`. Data persists in named Docker volumes (`prometheus_data`, `grafana_data`).
+
+### Sidekiq cron
+
+`StatsCollectorWorker` and `Recommendations::ScheduleAlgorithmicFeedsWorker` are scheduled in `config/sidekiq.yml` (every 5 minutes). `CustomFeeds::SchedulePullSourcesWorker` runs on the same cadence.
+
+---
 
 ## Production server setup
 
-All steps run on **antypdet-server** as the `mastodon` user (or with sudo where noted).
+All steps run on **antypdet-server** as the `mastodon` user (or with `sudo` where noted).
 
 ### 1. Install node_exporter
 
 ```bash
-# Download (check https://github.com/prometheus/node_exporter/releases for latest)
 VERSION=1.8.2
 wget https://github.com/prometheus/node_exporter/releases/download/v${VERSION}/node_exporter-${VERSION}.linux-amd64.tar.gz
 tar xf node_exporter-${VERSION}.linux-amd64.tar.gz
 sudo mv node_exporter-${VERSION}.linux-amd64/node_exporter /usr/local/bin/
 
-# Create systemd unit
 sudo tee /etc/systemd/system/node_exporter.service <<'EOF'
 [Unit]
 Description=Prometheus node_exporter
@@ -83,21 +110,9 @@ sudo systemctl enable --now redis_exporter
 
 > If Redis requires a password, add `Environment=REDIS_PASSWORD=yourpassword` to the unit file.
 
-### 3. Run the prometheus_exporter server (standalone mode)
+### 3. Run the prometheus_exporter server
 
-Mastodon's Rails and Sidekiq processes push metrics to a single collector process.
-This is preferable to LOCAL mode in production because only one port is needed.
-
-```bash
-# In /home/mastodon/live
-bundle exec prometheus_exporter \
-  --bind 0.0.0.0 \
-  --port 9394 \
-  --type-collector lib/mastodon/prometheus_exporter/custom_feeds_collector.rb \
-  >> log/prometheus_exporter.log 2>&1 &
-```
-
-As a systemd unit (recommended):
+Mastodon's Rails and Sidekiq processes push metrics to a single collector process. Standalone mode is required in production so only one port is exposed.
 
 ```bash
 sudo tee /etc/systemd/system/mastodon-prometheus-exporter.service <<EOF
@@ -129,10 +144,9 @@ sudo systemctl enable --now mastodon-prometheus-exporter
 Add to `/home/mastodon/live/.env.production`:
 
 ```env
-# prometheus_exporter — points at the standalone collector above
 MASTODON_PROMETHEUS_EXPORTER_ENABLED=true
 # Do NOT set MASTODON_PROMETHEUS_EXPORTER_LOCAL=true in production
-# (that starts an embedded server inside each process, conflicting on port)
+# (starts an embedded server inside each process, conflicting on port)
 
 # Optional: detailed per-action/controller HTTP metrics (some overhead)
 # MASTODON_PROMETHEUS_EXPORTER_WEB_DETAILED_METRICS=true
@@ -147,16 +161,7 @@ Restart Puma and Sidekiq after changing `.env.production`:
 sudo systemctl restart mastodon-web mastodon-sidekiq
 ```
 
-Verify metrics are flowing:
-
-```bash
-# Custom feed metrics should appear (non-zero after some activity)
-curl http://localhost:9394/metrics | grep custom_feed
-```
-
 ### 5. Open firewall ports from antypdet-gaming
-
-Prometheus on `antypdet-gaming` needs TCP access to:
 
 | Port | Service                                       |
 | ---- | --------------------------------------------- |
@@ -172,7 +177,7 @@ sudo ufw allow from <antypdet-gaming-ip> to any port 9394,9100,9121
 # Port 4000 may already be open for WebSocket clients
 ```
 
-If using Tailscale, no firewall changes needed — Tailscale handles routing.
+If using Tailscale, no firewall changes needed.
 
 ---
 
@@ -181,10 +186,9 @@ If using Tailscale, no firewall changes needed — Tailscale handles routing.
 On **antypdet-gaming** (Windows, in the repository directory):
 
 ```powershell
-# Start the stack
 docker compose -f monitoring/docker-compose.yml up -d
 
-# Verify Prometheus can reach the server
+# Verify Prometheus can reach the server:
 # Open http://localhost:9090/targets — all targets should show State=UP
 
 # Grafana: http://localhost:3001  (admin / admin)
@@ -204,17 +208,11 @@ To wipe and start fresh: add `--volumes` to the `down` command.
 
 ## Baseline measurement procedure
 
-Follow this procedure to isolate the marginal cost of custom feeds:
-
-1. **Deploy** the monitoring stack and verify all targets are UP in Prometheus.
-2. **Baseline (home feeds only)**: Disable all custom feed configs (`UPDATE custom_feed_configs SET enabled = false`), let the system run for ≥ 24 h. Record:
-   - Average CPU % from panel "Server CPU usage %"
-   - Average `sidekiq_job_duration_seconds` p95 for `FeedInsertWorker`
-   - Redis memory used (total)
-3. **Standard custom feeds**: Re-enable standard (non-algorithmic) configs. Run 24 h. Record delta.
-4. **Algorithmic feeds**: Enable algorithmic configs. Run 24 h. Record delta.
-5. **Extrapolation**: `marginal_cpu_per_feed = (delta_cpu_pct / num_active_custom_feeds)`.
-   Scale: `projected_cpu_at_N_users = baseline_cpu + (marginal_cpu_per_feed × N × feeds_per_user)`.
+1. **Deploy** the stack; verify all targets are UP in Prometheus.
+2. **Baseline (home feeds only)**: disable all custom feed configs (`UPDATE custom_feed_configs SET enabled = false`), run ≥ 24 h. Record average CPU %, `sidekiq_job_duration_seconds` p95 for `FeedInsertWorker`, and Redis memory used.
+3. **Standard custom feeds**: re-enable standard (non-algorithmic) configs. Run 24 h. Record delta.
+4. **Algorithmic feeds**: enable algorithmic configs. Run 24 h. Record delta.
+5. **Extrapolation**: `marginal_cpu_per_feed = delta_cpu_pct / num_active_custom_feeds`. Scale: `projected_cpu = baseline_cpu + (marginal_cpu_per_feed × N × feeds_per_user)`.
 
 The `dev:seed_custom_feeds` rake task can be used to create reproducible test loads in the dev container.
 

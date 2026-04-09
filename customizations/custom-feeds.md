@@ -317,6 +317,185 @@ attr_reader :overflow
 
 ---
 
+## Algorithmic Feeds
+
+An **algorithmic feed** is a `CustomFeedConfig` variant (`feed_type: 'algorithmic'`) that stages candidates in a pending queue, scores them with a pluggable algorithm, applies score-aware filters, and only then promotes them into the feed — rather than the direct filter-then-push model used by standard custom feeds.
+
+### How Algorithmic Feeds Differ From Standard
+
+**Standard custom feed pipeline:**
+
+```
+Sources → (standard filters) → feed:custom:{list_id}
+```
+
+**Algorithmic feed pipeline:**
+
+```
+Sources → (standard pre-filters) → feed:algo:{list_id}:pending
+                                         ↓  (ScheduleAlgorithmicFeedsWorker every 5 min)
+                                    AlgorithmicFeedWorker
+                                         ↓
+                                    score each candidate
+                                         ↓
+                               algorithmic filters (min_score, top_k_per_batch, min_signals)
+                                         ↓
+                               standard pipeline filters (final gate)
+                                         ↓
+                                  feed:custom:{list_id}
+```
+
+Key differences: candidates are staged rather than pushed directly; the algorithm worker scores the full batch enabling relative ranking; algorithmic filters (`min_score`, `top_k_per_batch`) require a score and run in the worker; standard filters run as pre-filters at ingest to reduce queue size.
+
+### Pending Queue
+
+```
+Redis key:  feed:algo:{list_id}:pending
+Type:       sorted set
+Score:      unix timestamp of when the candidate arrived
+Member:     status_id
+```
+
+- **Max size**: `FeedManager::MAX_ITEMS`. If full, the oldest entry is evicted before a new one is added.
+- **Expiry**: candidates older than `max_pending_age_hours` (default 48h) are discarded by the algorithm worker without scoring.
+- **Deduplication**: `ZSCORE` check before `ZADD` — same status is not queued twice; logs at debug on dedup hit.
+
+`CustomFeeds::FeedManager` manages the queue: `pending_key(list_id)`, `enqueue_candidate(config, status)`, `dequeue_pending(list_id, limit:, max_age_hours:)`.
+
+### Signal Collection
+
+The algorithm learns from the account's interaction history. Three interaction types contribute signals:
+
+| Interaction    | Weight | Reasoning                                    |
+| -------------- | ------ | -------------------------------------------- |
+| Reblog (boost) | 2.0    | Explicit endorsement; high-confidence signal |
+| Reply          | 2.0    | Deep engagement; high-confidence signal      |
+| Favourite      | 0.5    | Mild positive signal                         |
+
+Features extracted per interaction:
+
+```
+tag:#{tag.name}          → weight        (for each tag on the original post)
+account:#{account_id}    → weight        (author of the post)
+domain:#{account.domain} → weight × 0.5  (remote server affinity; skipped for local accounts)
+```
+
+Signals are stored in `recommendation_signals` with accumulating upsert (`weight +=`, `observation_count += 1`, `last_observed_at` updated). One row per `(account, signal_type, entity_id)` keeps the table size bounded.
+
+**Database schema:**
+
+```ruby
+create_table :recommendation_signals do |t|
+  t.references :account,           null: false, foreign_key: true
+  t.string     :signal_type,       null: false  # 'tag' | 'account' | 'domain'
+  t.string     :entity_id,         null: false  # tag name | account_id | domain
+  t.float      :weight,            null: false, default: 0.0
+  t.integer    :observation_count, null: false, default: 0
+  t.datetime   :last_observed_at
+  t.timestamps
+  t.index [:account_id, :signal_type, :entity_id],
+          unique: true, name: 'idx_rec_signals_lookup'
+end
+```
+
+### Algorithm Plugin Interface
+
+```ruby
+# app/lib/recommendations/algorithms/base.rb
+module Recommendations
+  module Algorithms
+    class Base
+      include CustomFeeds::Registerable
+
+      def initialize(account)
+        @account = account
+      end
+
+      # Score a batch of candidates. Returns [{status:, score: Float}] sorted descending.
+      def score_batch(candidates)
+        candidates.map { |s| { status: s, score: score_one(s) } }.sort_by { |r| -r[:score] }
+      end
+
+      def score_one(_status) = 0.0
+    end
+  end
+end
+```
+
+Uses `CustomFeeds::Registerable` — the same shared concern as all other plugin base classes. Registry accessed as `Recommendations::Algorithms::Base.registry['key']`.
+
+### Implemented Algorithm: `affinity_score`
+
+Weighted feature affinity with time decay. No ML library required. Works from the first interaction and improves over time.
+
+**Scoring formula:**
+
+```
+score(status) =
+  Σ tag_affinity[tag]         (first 5 tags)
+  + account_affinity[author_id]
+  + domain_affinity[author.domain] × 0.5  (local accounts: 0)
+  × exp(−0.05 × age_in_hours)             (half-life ≈ 14 hours)
+```
+
+`score_batch` loads all signals in a single query and partitions in Ruby into three hashes (`@tag_affinities`, `@account_affinities`, `@domain_affinities`), then calls `score_one` per candidate. One DB round-trip per batch regardless of batch size.
+
+### Algorithmic Filters
+
+These filters require a score and run in the algorithm worker, not at ingest time.
+
+| `step_type`       | Phase                | Description                                                      | Key options                      |
+| ----------------- | -------------------- | ---------------------------------------------------------------- | -------------------------------- |
+| `min_signals`     | `algorithmic_filter` | Skip all scoring until the account has at least N signal records | `count: Integer` (default 5)     |
+| `min_score`       | `algorithmic_filter` | Discard candidates below score threshold                         | `threshold: Float` (default 0.1) |
+| `top_k_per_batch` | `algorithmic_filter` | Promote only the top K candidates per run                        | `k: Integer` (default 10)        |
+
+`min_signals` is evaluated first (pre-scoring gate). `min_score` and `top_k_per_batch` run on the scored result set.
+
+### Signal Worker
+
+`app/workers/recommendations/signal_worker.rb` — records interaction signals:
+
+- Enqueued by `FavouriteConcern` (favourite), `StatusConcern` (reblog, reply)
+- Guards itself: returns immediately if the account has no enabled algorithmic configs
+- Upserts one `recommendation_signal` row per feature extracted from the original post
+- Domain signals only for remote accounts — all local accounts share the same server so domain is not a meaningful signal
+
+### Algorithm Worker
+
+`app/workers/recommendations/algorithmic_feed_worker.rb`:
+
+```
+perform(config_id)
+  config = CustomFeedConfig.algorithmic.enabled.find_by(id:)
+  return unless account.user&.signed_in_recently?
+  dequeue_pending → candidates
+  return if candidates.empty?
+  apply min_signals gate (return early if signal count < required)
+  scored = algo_klass.new(account).score_batch(candidates)
+  apply min_score, top_k_per_batch filters
+  pipeline = Pipeline.new(config)
+  for each scored candidate:
+    push_and_stream if pipeline.passes_filters?(status, account)
+  logs: dequeued, score min/max/p50, promoted/filtered_score/filtered_pipeline counts at info
+```
+
+### Scheduler
+
+`app/workers/recommendations/schedule_algorithmic_feeds_worker.rb` runs every 5 minutes via `config/sidekiq.yml`. Queries `CustomFeedConfig.algorithmic.enabled` for configs due for a run based on `last_pulled_at` and `pull_cadence_minutes`, then enqueues `AlgorithmicFeedWorker` for each.
+
+### Future Work: ML Upgrade Path
+
+After `affinity_score` has been running in production and signals have been collecting for several weeks:
+
+1. **Observe**: verify score distribution stability, promotion rate > 10%, queue depth bounded, `observation_count` distribution across accounts.
+
+2. **Naive Bayes Classifier** (`rumale`): per-account trained classifier producing calibrated probability-of-engagement scores. Pure Ruby via `Rumale::NaiveBayes::ComplementNB` — no Python required. Well-suited for sparse, imbalanced datasets. Would require a `recommendation_training_examples` table (positive = interacted, negative = promoted-but-not-interacted), a `recommendation_models` table (serialised model per account), and a `ModelTrainingWorker`. The `Algorithms::Base` interface is already compatible — a `NaiveBayes` class would fall back to `AffinityScore` if no model exists.
+
+3. **Further algorithm ideas**: collaborative filtering, TF-IDF/embeddings cosine similarity, recency-aware diversity (MMR as an opt-in `algorithmic_filter`), Two Towers (via HTTP sidecar).
+
+---
+
 ## Workers
 
 ### `app/workers/custom_feeds/feed_insert_worker.rb`
@@ -355,7 +534,9 @@ rescue ActiveRecord::RecordNotFound → log at debug
 
 ### `app/workers/custom_feeds/pull_source_ingest_worker.rb`
 
-Queue: `pull`, retry: 3. Fetches candidates from pull sources, advances cursors, runs filter pipeline, and pushes/enqueues. Logs start, per-bucket fetch counts, dedup, and final promoted/filtered summary.
+Queue: `pull`, retry: 3. Fetches candidates from pull sources, advances cursors, runs filter pipeline, and pushes/enqueues. Logs per-attempt fetch/promote/filter counts and a final summary.
+
+If fewer than 3/4 of fetched candidates pass the filter pipeline in a given round, the worker re-fetches (cursors are already advanced) and processes the additional candidates. It retries up to `MAX_RETRIES` (3) additional times, stopping early if the cursor stops advancing or all fetched posts were already seen.
 
 ```
 perform(config_id)
@@ -364,20 +545,30 @@ perform(config_id)
   pipeline = Pipeline.new(config)
   return unless pipeline.pull_sources?
 
-  for each pull_source_entry:
-    for each bucket:
-      cursor = CustomFeedPullCursor.for_step_bucket(step, bucket)
-      result = source.fetch_candidates(…, since_id: cursor.last_fetched_id)
-      cursor.update!(last_fetched_id: result.max_remote_id)
-      all_candidates.concat(result.statuses)
+  seen = Set.new
+  (1 + MAX_RETRIES).times do |attempt|
+    any_cursor_advanced, raw_candidates = fetch_round(pipeline, account)
+    new_candidates = raw_candidates.reject { |s| seen.include?(s.id) }
+    round_promoted, round_filtered = promote_candidates(new_candidates, pipeline, config, account)
+    break unless any_cursor_advanced
+    break if new_candidates.empty?
+    break if round_promoted >= new_candidates.size * (3.0/4.0)
+  end
 
   config.update_column(:last_pulled_at, Time.current)
-  deduped = all_candidates deduplicated by id
 
-  for each status in deduped:
-    next if blocking/muting/domain-blocking
-    next unless pipeline.passes_filters?(status, account)
-    if algorithmic: enqueue_candidate  else: push_and_stream
+fetch_round: for each pull_source_entry / bucket:
+  cursor = CustomFeedPullCursor.for_step_bucket(step, bucket)
+  result = source.fetch_candidates(…, since_id: cursor.last_fetched_id)
+  cursor.update!(last_fetched_id: result.max_remote_id) if max_remote_id.present?
+  returns [any_cursor_advanced, candidates]
+
+promote_candidates: for each status:
+  next if blocking/muting/domain-blocking
+  next unless pipeline.passes_filters?(status, account)
+  if algorithmic: enqueue_candidate  else: push_and_stream
+  returns [promoted, filtered]
+
 rescue ActiveRecord::RecordNotFound → log at debug
 ```
 
