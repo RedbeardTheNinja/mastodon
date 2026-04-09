@@ -473,6 +473,7 @@
   "custom_feeds.card.disabled": "Disabled",
   "custom_feeds.card.edit": "Edit",
   "custom_feeds.filters.blocked_tags": "Block by tag",
+  "custom_feeds.filters.followed_accounts": "Hide posts from followed accounts",
   "custom_feeds.filters.friends_liked": "Only posts liked by people you follow",
   "custom_feeds.filters.home_filters": "Hide blocked and muted accounts",
   "custom_feeds.filters.interacted_posts": "Hide already-interacted posts",

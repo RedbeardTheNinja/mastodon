@@ -168,6 +168,10 @@ const stepLabels = defineMessages({
     id: 'custom_feeds.filters.blocked_tags',
     defaultMessage: 'Block by tag',
   },
+  followedAccounts: {
+    id: 'custom_feeds.filters.followed_accounts',
+    defaultMessage: 'Hide posts from followed accounts',
+  },
   onInteraction: {
     id: 'custom_feeds.removal_strategies.on_interaction',
     defaultMessage: 'Remove on interaction (favourite, boost, or reply)',
@@ -245,6 +249,7 @@ const PHASE_OPTIONS: Record<CustomFeedPhase, StepOption[]> = {
     { value: 'interacted_posts', label: stepLabels.interactedPosts },
     { value: 'friends_liked', label: stepLabels.friendsLiked },
     { value: 'blocked_tags', label: stepLabels.blockedTags },
+    { value: 'followed_accounts', label: stepLabels.followedAccounts },
   ],
   algorithm: [{ value: 'affinity_score', label: stepLabels.affinityScore }],
   algorithmic_filter: [

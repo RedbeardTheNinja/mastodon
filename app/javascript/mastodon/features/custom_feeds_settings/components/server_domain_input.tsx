@@ -2,12 +2,8 @@ import { useState, useCallback, useRef, useEffect, useId } from 'react';
 
 import { useIntl, defineMessages } from 'react-intl';
 
-import {
-  KNOWN_SERVERS,
-  CATEGORY_LABELS
-  
-} from '../data/known_servers';
-import type {KnownServer} from '../data/known_servers';
+import { KNOWN_SERVERS, CATEGORY_LABELS } from '../data/known_servers';
+import type { KnownServer } from '../data/known_servers';
 
 const messages = defineMessages({
   filterPlaceholder: {
@@ -109,7 +105,9 @@ export const ServerDomainInput: React.FC<Props> = ({
       }
     };
     document.addEventListener('mousedown', handler);
-    return () => { document.removeEventListener('mousedown', handler); };
+    return () => {
+      document.removeEventListener('mousedown', handler);
+    };
   }, []);
 
   // Focus filter input when dropdown opens
@@ -199,15 +197,7 @@ export const ServerDomainInput: React.FC<Props> = ({
         onClick={handleButtonClick}
       >
         {value ? (
-          <span className='server-domain-input__selected'>
-            {value}
-            {selectedServer && (
-              <span className='server-domain-input__category'>
-                {CATEGORY_LABELS[selectedServer.category] ??
-                  selectedServer.category}
-              </span>
-            )}
-          </span>
+          <span className='server-domain-input__selected'>{value}</span>
         ) : (
           <span className='server-domain-input__placeholder'>
             {intl.formatMessage(messages.filterPlaceholder)}
