@@ -4,11 +4,20 @@ module CustomFeeds
   # Fetches candidates from all pull sources for a single CustomFeedConfig,
   # runs them through the filter pipeline, and pushes passing statuses into
   # the feed. Updates last_pulled_at on the config when complete.
+  #
+  # When fewer than 3/4 of fetched candidates pass the filter pipeline, the
+  # worker re-fetches (cursors already advanced) and adds the new candidates
+  # to the result. It retries up to MAX_RETRIES additional times, stopping
+  # early if the API returns nothing new (cursor stopped advancing) or all
+  # fetched candidates were already seen.
   class PullSourceIngestWorker
     include Sidekiq::Worker
     include DatabaseHelper
 
     sidekiq_options queue: 'pull', retry: 3, lock: :until_executed, lock_ttl: 30.minutes.to_i
+
+    MAX_RETRIES = 3
+    REFILL_THRESHOLD = 3.0 / 4.0
 
     def perform(config_id)
       config = CustomFeedConfig.find_by(id: config_id)
@@ -22,7 +31,55 @@ module CustomFeeds
 
       Rails.logger.info { "PullSourceIngestWorker: config=#{config_id} starting" }
 
-      all_candidates = []
+      seen           = Set.new
+      total_promoted = 0
+      total_filtered = 0
+
+      # Initial fetch plus up to MAX_RETRIES additional rounds.
+      (1 + MAX_RETRIES).times do |attempt|
+        any_cursor_advanced, raw_candidates = fetch_round(config_id, pipeline, account)
+
+        new_candidates = raw_candidates.reject { |s| seen.include?(s.id) }
+        new_candidates.each { |s| seen.add(s.id) }
+
+        round_promoted, round_filtered = promote_candidates(new_candidates, pipeline, config, account)
+        total_promoted += round_promoted
+        total_filtered += round_filtered
+
+        Rails.logger.debug do
+          "PullSourceIngestWorker: config=#{config_id} attempt=#{attempt + 1} " \
+            "fetched=#{new_candidates.size} promoted=#{round_promoted} filtered=#{round_filtered}"
+        end
+
+        # Stop if the API has no more posts, all fetched posts were already seen,
+        # or enough posts made it through the filter this round.
+        break unless any_cursor_advanced
+        break if new_candidates.empty?
+        break if round_promoted >= new_candidates.size * REFILL_THRESHOLD
+      end
+
+      # Stamp last_pulled_at after all rounds so the scheduler knows this run
+      # completed (avoids re-enqueuing on the next 5-minute tick).
+      config.update_column(:last_pulled_at, Time.current)
+
+      Rails.logger.info do
+        "PullSourceIngestWorker: config=#{config_id} total_promoted=#{total_promoted} total_filtered=#{total_filtered}"
+      end
+    rescue ActiveRecord::RecordNotFound
+      # Config or account was deleted before the job ran — expected, not an error.
+      Rails.logger.debug { "#{self.class.name}: record not found for config #{config_id}" }
+    end
+
+    private
+
+    # Runs one fetch round across all pull source entries and their buckets.
+    # Advances cursors for any bucket that returned a new max_remote_id.
+    #
+    # Returns [any_cursor_advanced, candidates] where any_cursor_advanced is true
+    # if at least one bucket's cursor moved (i.e. the API returned new posts).
+    def fetch_round(config_id, pipeline, account)
+      any_cursor_advanced = false
+      candidates = []
 
       pipeline.pull_source_entries.each do |entry|
         klass   = entry[:klass]
@@ -45,28 +102,27 @@ module CustomFeeds
 
           # Always advance the cursor from the raw API response ID so we don't
           # re-fetch posts that failed to resolve (e.g. transient federation gaps).
-          cursor.update!(last_fetched_id: result.max_remote_id, last_fetched_at: Time.current) if result.max_remote_id.present?
+          if result.max_remote_id.present?
+            cursor.update!(last_fetched_id: result.max_remote_id, last_fetched_at: Time.current)
+            any_cursor_advanced = true
+          end
 
-          all_candidates.concat(result.statuses)
+          candidates.concat(result.statuses)
         end
       end
 
-      # Always stamp last_pulled_at so the scheduler knows this run completed,
-      # even when no statuses resolved (avoids re-enqueuing every 5-minute tick).
-      config.update_column(:last_pulled_at, Time.current)
+      [any_cursor_advanced, candidates]
+    end
 
-      return if all_candidates.empty?
-
-      seen = Set.new
-      deduped = all_candidates.select { |s| seen.add?(s.id) }
-      Rails.logger.debug do
-        "PullSourceIngestWorker: config=#{config_id} total=#{all_candidates.size} " \
-          "after_dedup=#{deduped.size} (#{all_candidates.size - deduped.size} dupes removed)"
-      end
-
+    # Filters candidates through block/mute/domain checks and the pipeline,
+    # then pushes passing statuses into the feed (or pending queue for algo feeds).
+    #
+    # Returns [promoted, filtered] counts.
+    def promote_candidates(candidates, pipeline, config, account)
       promoted = 0
       filtered = 0
-      deduped.each do |status|
+
+      candidates.each do |status|
         # Respect user-level blocks, mutes, and domain blocks.
         # We don't use FeedManager.filter(:home, ...) here because filter_from_home
         # applies home-feed-specific rules (language filters, exclusive-list skips)
@@ -92,12 +148,7 @@ module CustomFeeds
         promoted += 1
       end
 
-      Rails.logger.info do
-        "PullSourceIngestWorker: config=#{config_id} promoted=#{promoted} filtered=#{filtered}"
-      end
-    rescue ActiveRecord::RecordNotFound
-      # Config or account was deleted before the job ran — expected, not an error.
-      Rails.logger.debug { "#{self.class.name}: record not found for config #{config_id}" }
+      [promoted, filtered]
     end
   end
 end
