@@ -6,25 +6,17 @@ module Recommendations
 
     sidekiq_options queue: 'default', retry: 3
 
-    WEIGHTS = {
-      'reblog' => 2.0,
-      'reply' => 2.0,
-      'favourite' => 0.5,
-    }.freeze
-
-    DOMAIN_MULTIPLIER = 0.5
-
     def perform(interaction_type, status_id, account_id)
       account = Account.find(account_id)
       return unless CustomFeedConfig.where(account: account, feed_type: 'algorithmic').exists?(enabled: true)
 
       status   = Status.find(status_id)
       original = status.original_status
-      weight   = WEIGHTS.fetch(interaction_type, 0.0)
+      weight   = Recommendations::SignalConfig.interaction_weight(interaction_type)
       return if weight.zero?
 
       original.tags.each do |tag|
-        upsert_signal(account, 'tag', tag.name.downcase, weight)
+        upsert_signal(account, 'tag', tag.name.downcase, weight * Recommendations::SignalConfig.signal_weight('tag'))
         CustomFeeds::Metrics.record_signal(signal_type: 'tag', interaction_type: interaction_type)
       end
 
@@ -34,8 +26,37 @@ module Recommendations
       # Only record domain signals for remote accounts — local accounts all share
       # the same server, so the domain is not a meaningful cross-account signal.
       if original.account.domain.present?
-        upsert_signal(account, 'domain', original.account.domain, weight * DOMAIN_MULTIPLIER)
+        upsert_signal(account, 'domain', original.account.domain,
+                      weight * Recommendations::SignalConfig.signal_weight('domain_multiplier'))
         CustomFeeds::Metrics.record_signal(signal_type: 'domain', interaction_type: interaction_type)
+      end
+
+      # Extract keyphrases from post body
+      plain_text = Nokogiri::HTML.parse(original.text.to_s).text.strip
+      if plain_text.present?
+        Recommendations::KeybertClient.extract(
+          plain_text,
+          top_n: Recommendations::SignalConfig.keybert('top_n'),
+          max_ngram: Recommendations::SignalConfig.keybert('max_ngram')
+        ).each do |phrase|
+          upsert_signal(account, 'text_phrase', phrase,
+                        weight * Recommendations::SignalConfig.signal_weight('text_phrase'))
+          CustomFeeds::Metrics.record_signal(signal_type: 'text_phrase', interaction_type: interaction_type)
+        end
+      end
+
+      # Extract keyphrases from media alt text
+      alt_text = original.media_attachments.filter_map(&:description).join(' ').strip
+      if alt_text.present?
+        Recommendations::KeybertClient.extract(
+          alt_text,
+          top_n: Recommendations::SignalConfig.keybert('top_n'),
+          max_ngram: Recommendations::SignalConfig.keybert('max_ngram')
+        ).each do |phrase|
+          upsert_signal(account, 'alt_text_phrase', phrase,
+                        weight * Recommendations::SignalConfig.signal_weight('alt_text_phrase'))
+          CustomFeeds::Metrics.record_signal(signal_type: 'alt_text_phrase', interaction_type: interaction_type)
+        end
       end
     rescue ActiveRecord::RecordNotFound
       true

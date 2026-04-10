@@ -1,0 +1,49 @@
+- content_for :page_title do
+  Recommendation Signals
+
+.table-wrapper
+  %table.table
+    %thead
+      %tr
+        %th User
+        %th Signals
+        %th Actions
+    %tbody
+      - @accounts.each do |account|
+        %tr
+          %td
+            = link_to account.acct, admin_account_path(account.id)
+          %td
+            = @signal_counts[account.id] || 0
+          %td
+            = button_to 'Resubmit signals',
+                        resubmit_admin_recommendation_signals_path(account_id: account.id),
+                        method: :post,
+                        class: 'button button--dangerous',
+                        data: { confirm: t('admin.reports.are_you_sure') }
+
+        - Array(@configs_by_account[account.id]).each do |config|
+          - next unless config.custom_feed_steps.any? { |s| s.phase == 'source' }
+
+          %tr.muted
+            %td{ colspan: 2 }
+              %span.name
+                = config.list.title.presence || "Feed ##{config.id}"
+              &nbsp;
+              %small
+                - if config.last_pulled_at
+                  Last run: #{time_ago_in_words(config.last_pulled_at)} ago
+                - else
+                  Never run
+            %td
+              = button_to 'Run now',
+                          run_feed_admin_recommendation_signals_path(config_id: config.id),
+                          method: :post,
+                          class: 'button'
+
+      - if @accounts.empty?
+        %tr
+          %td{ colspan: 3 }
+            = nothing_here
+
+= paginate @accounts

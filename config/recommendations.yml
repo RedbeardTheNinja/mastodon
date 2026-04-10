@@ -1,0 +1,21 @@
+interaction_weights:
+  reblog: 2.0
+  reply: 2.0
+  favourite: 0.5
+
+signal_weights:
+  tag: 1.0
+  text_phrase: 0.7
+  alt_text_phrase: 0.9
+  domain_multiplier: 0.25
+
+scoring:
+  decay_lambda: 0.05
+  tag_cap: 5
+  text_phrase_cap: 5
+  alt_text_phrase_cap: 5
+  domain_score_multiplier: 0.5
+
+keybert:
+  top_n: 10
+  max_ngram: 3

@@ -1,4 +1,5 @@
 const config = {
+  concurrent: false,
   '*': 'oxfmt --no-error-on-unmatched-pattern',
   'Gemfile|*.{rb,ruby,ru,rake}': 'bin/rubocop --force-exclusion -a',
   '*.{js,jsx,ts,tsx}': 'eslint --fix',

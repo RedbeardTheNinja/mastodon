@@ -26,6 +26,14 @@ const messages = defineMessages({
   tags: { id: 'custom_feeds.signals.tags', defaultMessage: 'Tags' },
   accounts: { id: 'custom_feeds.signals.accounts', defaultMessage: 'Accounts' },
   domains: { id: 'custom_feeds.signals.domains', defaultMessage: 'Domains' },
+  textPhrases: {
+    id: 'custom_feeds.signals.text_phrases',
+    defaultMessage: 'Text phrases',
+  },
+  altTextPhrases: {
+    id: 'custom_feeds.signals.alt_text_phrases',
+    defaultMessage: 'Alt text phrases',
+  },
   weight: { id: 'custom_feeds.signals.weight', defaultMessage: 'Weight' },
   observations: {
     id: 'custom_feeds.signals.observations',
@@ -252,7 +260,7 @@ export const CustomFeedsSignals: React.FC<{ multiColumn?: boolean }> = ({
       acc[s.signal_type] = [...acc[s.signal_type], s];
       return acc;
     },
-    { tag: [], account: [], domain: [] },
+    { tag: [], account: [], domain: [], text_phrase: [], alt_text_phrase: [] },
   );
 
   return (
@@ -291,6 +299,18 @@ export const CustomFeedsSignals: React.FC<{ multiColumn?: boolean }> = ({
             <SignalSection
               title={intl.formatMessage(messages.domains)}
               signals={byType.domain}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+            />
+            <SignalSection
+              title={intl.formatMessage(messages.textPhrases)}
+              signals={byType.text_phrase}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+            />
+            <SignalSection
+              title={intl.formatMessage(messages.altTextPhrases)}
+              signals={byType.alt_text_phrase}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
             />

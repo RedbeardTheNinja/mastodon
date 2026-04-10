@@ -2,7 +2,7 @@ import { apiRequestGet, apiRequestPatch, apiRequestDelete } from 'mastodon/api';
 
 export interface ApiRecommendationSignalJSON {
   id: string;
-  signal_type: 'tag' | 'account' | 'domain';
+  signal_type: 'tag' | 'account' | 'domain' | 'text_phrase' | 'alt_text_phrase';
   entity_id: string;
   weight: number;
   observation_count: number;

@@ -18,7 +18,7 @@
 class RecommendationSignal < ApplicationRecord
   belongs_to :account
 
-  validates :signal_type, inclusion: { in: %w(tag account domain) }
+  validates :signal_type, inclusion: { in: %w(tag account domain text_phrase alt_text_phrase) }
   validates :entity_id, presence: true
   validates :account_id, uniqueness: { scope: [:signal_type, :entity_id] }
 end
