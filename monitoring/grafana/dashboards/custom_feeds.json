@@ -326,10 +326,118 @@
     },
 
     {
+      "id": 20,
+      "type": "row",
+      "title": "Pull Source & Score Distribution",
+      "gridPos": { "x": 0, "y": 36, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 21,
+      "title": "Algo score distribution  (p50 / p95 of posts reaching pipeline)",
+      "description": "Affinity scores of posts that pass the score threshold and reach the pipeline filter. p50 = median quality; p95 = top-end quality. Rising p50 means the signal data is maturing.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 37, "w": 12, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(ruby_custom_feed_algo_score_bucket[10m]))",
+          "legendFormat": "p50 score",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(ruby_custom_feed_algo_score_bucket[10m]))",
+          "legendFormat": "p95 score",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_algo_score_sum[10m]) / rate(ruby_custom_feed_algo_score_count[10m])",
+          "legendFormat": "mean score",
+          "refId": "C"
+        }
+      ]
+    },
+
+    {
+      "id": 22,
+      "title": "Pull source: posts fetched / sec",
+      "description": "Rate of posts fetched from remote sources by PullSourceIngestWorker, by feed type. Includes all fetch rounds (retries). Compare to inserts rate to see filter efficiency.",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 37, "w": 6, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "rate(ruby_custom_feed_pull_source_fetched_total{feed_type=\"standard\"}[5m])",
+          "legendFormat": "Standard feeds",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_pull_source_fetched_total{feed_type=\"algorithmic\"}[5m])",
+          "legendFormat": "Algorithmic feeds",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 23,
+      "title": "Pull source: retry attempt distribution",
+      "description": "How many fetch rounds each PullSourceIngestWorker run needed. 'attempts=1' = no retry needed; '4' = hit max retries. High proportion of 4s means the feed filter is very aggressive.",
+      "type": "timeseries",
+      "gridPos": { "x": 18, "y": 37, "w": 6, "h": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "stacking": { "mode": "normal" }
+          }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "rate(ruby_custom_feed_pull_source_runs_total{attempts=\"1\"}[10m])",
+          "legendFormat": "1 attempt (no retry)",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_pull_source_runs_total{attempts=\"2\"}[10m])",
+          "legendFormat": "2 attempts",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_pull_source_runs_total{attempts=\"3\"}[10m])",
+          "legendFormat": "3 attempts",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(ruby_custom_feed_pull_source_runs_total{attempts=\"4\"}[10m])",
+          "legendFormat": "4 attempts (max retries)",
+          "refId": "D"
+        }
+      ]
+    },
+
+    {
       "id": 13,
       "type": "row",
       "title": "System Resources  (server-wide view)",
-      "gridPos": { "x": 0, "y": 36, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 45, "w": 24, "h": 1 },
       "collapsed": false
     },
 
@@ -338,7 +446,7 @@
       "title": "Server CPU usage %",
       "description": "Overall server CPU.  Correlate spikes with custom feed worker job rates above to attribute CPU cost.",
       "type": "timeseries",
-      "gridPos": { "x": 0, "y": 37, "w": 8, "h": 8 },
+      "gridPos": { "x": 0, "y": 46, "w": 8, "h": 8 },
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
@@ -364,7 +472,7 @@
       "title": "Redis total memory used",
       "description": "redis_memory_used_bytes from redis_exporter.  Watch for growth as feeds accumulate posts.",
       "type": "timeseries",
-      "gridPos": { "x": 8, "y": 37, "w": 8, "h": 8 },
+      "gridPos": { "x": 8, "y": 46, "w": 8, "h": 8 },
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } },
@@ -390,7 +498,7 @@
       "title": "Sidekiq process RSS",
       "description": "ruby_rss{type=\"sidekiq\"} from prometheus_exporter.  Should be stable; growth indicates a memory leak.",
       "type": "timeseries",
-      "gridPos": { "x": 16, "y": 37, "w": 8, "h": 8 },
+      "gridPos": { "x": 16, "y": 46, "w": 8, "h": 8 },
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } },

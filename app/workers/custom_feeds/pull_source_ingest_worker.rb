@@ -34,6 +34,8 @@ module CustomFeeds
       seen           = Set.new
       total_promoted = 0
       total_filtered = 0
+      total_fetched  = 0
+      attempts_made  = 0
 
       # Initial fetch plus up to MAX_RETRIES additional rounds.
       (1 + MAX_RETRIES).times do |attempt|
@@ -45,25 +47,40 @@ module CustomFeeds
         round_promoted, round_filtered = promote_candidates(new_candidates, pipeline, config, account)
         total_promoted += round_promoted
         total_filtered += round_filtered
+        total_fetched  += new_candidates.size
+        attempts_made   = attempt + 1
 
-        Rails.logger.debug do
+        Rails.logger.info do
           "PullSourceIngestWorker: config=#{config_id} attempt=#{attempt + 1} " \
             "fetched=#{new_candidates.size} promoted=#{round_promoted} filtered=#{round_filtered}"
         end
 
         # Stop if the API has no more posts, all fetched posts were already seen,
         # or enough posts made it through the filter this round.
-        break unless any_cursor_advanced
-        break if new_candidates.empty?
-        break if round_promoted >= new_candidates.size * REFILL_THRESHOLD
+        break_reason =
+          if !any_cursor_advanced then 'cursor_not_advanced'
+          elsif new_candidates.empty? then 'no_new_posts'
+          elsif round_promoted >= new_candidates.size * REFILL_THRESHOLD then 'threshold_met'
+          end
+
+        if break_reason
+          Rails.logger.debug { "PullSourceIngestWorker: config=#{config_id} stopping (#{break_reason})" }
+          break
+        end
       end
+
+      feed_type = pipeline.algorithmic? ? 'algorithmic' : 'standard'
+      CustomFeeds::Metrics.record_pull_source_fetched(feed_type: feed_type, count: total_fetched)
+      CustomFeeds::Metrics.record_pull_source_run(feed_type: feed_type, attempts: attempts_made)
 
       # Stamp last_pulled_at after all rounds so the scheduler knows this run
       # completed (avoids re-enqueuing on the next 5-minute tick).
       config.update_column(:last_pulled_at, Time.current)
 
       Rails.logger.info do
-        "PullSourceIngestWorker: config=#{config_id} total_promoted=#{total_promoted} total_filtered=#{total_filtered}"
+        "PullSourceIngestWorker: config=#{config_id} done " \
+          "attempts=#{attempts_made} total_fetched=#{total_fetched} " \
+          "total_promoted=#{total_promoted} total_filtered=#{total_filtered}"
       end
     rescue ActiveRecord::RecordNotFound
       # Config or account was deleted before the job ran — expected, not an error.

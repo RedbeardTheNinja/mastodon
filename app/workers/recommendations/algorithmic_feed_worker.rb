@@ -58,6 +58,13 @@ module Recommendations
       filtered_score = before_filter - scored.size
       filtered_score.times { CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_score') }
 
+      Rails.logger.debug do
+        "AlgorithmicFeedWorker: config=#{config_id} score_filter removed=#{filtered_score} remaining=#{scored.size}"
+      end
+
+      # Emit score histogram for posts that passed the score threshold and reach the pipeline.
+      scored.each { |r| CustomFeeds::Metrics.record_algo_score(score: r[:score]) }
+
       # Run standard pipeline filters as a final gate before promotion
       pipeline = CustomFeeds::Pipeline.new(config)
       promoted_count = 0
@@ -67,6 +74,9 @@ module Recommendations
           CustomFeeds::FeedManager.instance.push_and_stream(config, result[:status])
           CustomFeeds::Metrics.record_algo_candidate(result: 'promoted')
           promoted_count += 1
+          Rails.logger.debug do
+            "AlgorithmicFeedWorker: config=#{config_id} promoted status=#{result[:status].id} score=#{result[:score].round(4)}"
+          end
         else
           CustomFeeds::Metrics.record_algo_candidate(result: 'filtered_pipeline')
           filtered_pipeline_count += 1

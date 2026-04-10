@@ -17,6 +17,18 @@ module CustomFeeds
       send_metric(metric: 'signal_record', signal_type: signal_type, interaction_type: interaction_type)
     end
 
+    def self.record_algo_score(score:)
+      send_metric(metric: 'algo_score', score: score)
+    end
+
+    def self.record_pull_source_fetched(feed_type:, count:)
+      send_metric(metric: 'pull_source_fetched', feed_type: feed_type, count: count)
+    end
+
+    def self.record_pull_source_run(feed_type:, attempts:)
+      send_metric(metric: 'pull_source_run', feed_type: feed_type, attempts: attempts)
+    end
+
     def self.record_redis_gauge(feed_type:, memory_bytes:, key_count:)
       send_metric(metric: 'redis_memory', feed_type: feed_type, value: memory_bytes)
       send_metric(metric: 'redis_count',  feed_type: feed_type, value: key_count)

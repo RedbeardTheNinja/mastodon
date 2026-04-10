@@ -15,9 +15,14 @@ module Recommendations
       weight   = Recommendations::SignalConfig.interaction_weight(interaction_type)
       return if weight.zero?
 
+      tag_count          = 0
+      text_phrase_count  = 0
+      alt_phrase_count   = 0
+
       original.tags.each do |tag|
         upsert_signal(account, 'tag', tag.name.downcase, weight * Recommendations::SignalConfig.signal_weight('tag'))
         CustomFeeds::Metrics.record_signal(signal_type: 'tag', interaction_type: interaction_type)
+        tag_count += 1
       end
 
       upsert_signal(account, 'account', original.account_id.to_s, weight)
@@ -42,6 +47,7 @@ module Recommendations
           upsert_signal(account, 'text_phrase', phrase,
                         weight * Recommendations::SignalConfig.signal_weight('text_phrase'))
           CustomFeeds::Metrics.record_signal(signal_type: 'text_phrase', interaction_type: interaction_type)
+          text_phrase_count += 1
         end
       end
 
@@ -56,7 +62,13 @@ module Recommendations
           upsert_signal(account, 'alt_text_phrase', phrase,
                         weight * Recommendations::SignalConfig.signal_weight('alt_text_phrase'))
           CustomFeeds::Metrics.record_signal(signal_type: 'alt_text_phrase', interaction_type: interaction_type)
+          alt_phrase_count += 1
         end
+      end
+
+      Rails.logger.info do
+        "SignalWorker: account=#{account_id} status=#{status_id} interaction=#{interaction_type} " \
+          "tags=#{tag_count} text_phrases=#{text_phrase_count} alt_phrases=#{alt_phrase_count}"
       end
     rescue ActiveRecord::RecordNotFound
       true
